@@ -290,11 +290,37 @@
     }
   }
 
-  function negStamp(ctx, table, scale) {
+  // ---- transient effects ---------------------------------------------------
+  //
+  // The chrome hands the painter `view.effects.at[kind]`: when the newest
+  // event of each kind landed, or null when it must not animate (a scrub
+  // jump lands a whole prefix at once). `effectResetKinds: ["match"]` wipes
+  // the table at the start of every match.
+
+  function negAge(view, kind) {
+    var at = view.effects && view.effects.at ? view.effects.at[kind] : null;
+    if (!at) return -1;
+    return Math.max(0, (view.now || Date.now()) - at);
+  }
+
+  // 1 once the entrance has played out — and immediately, when the chrome
+  // says this event must not animate.
+  function negEntrance(view, kind, ms) {
+    var age = negAge(view, kind);
+    if (age < 0) return 1;
+    var t = Math.min(1, age / ms);
+    return 1 - (1 - t) * (1 - t);
+  }
+
+  function negStamp(ctx, table, scale, entrance) {
     var w = ctx.canvas.width;
     var h = ctx.canvas.height;
     var deal = table.outcome === "deal";
     var payoff = table.payoff || [0, 0];
+    ctx.save();
+    // The stamp lands rather than blinks on, and then holds until the next
+    // match's `match` event resets the effect table.
+    ctx.globalAlpha = 0.15 + 0.85 * entrance;
     ctx.save();
     ctx.translate(w / 2, h * 0.5);
     ctx.rotate(-0.12);
@@ -317,6 +343,7 @@
       font: negFont(Math.min(22 * scale, w * 0.055), 700),
       color: PAPER, maxWidth: w * 0.7
     });
+    ctx.restore();
   }
 
   function negStage(ctx, canvas, images, view) {
@@ -407,17 +434,25 @@
         font: negFont(11 * scale), color: GHOST, maxWidth: w * 0.8
       });
     } else {
-      negPoolRow(ctx, w * 0.27, rowY, w * 0.4, shareA,
+      // A new offer slides in from the seat that made it and then holds:
+      // the standing split stays lit while the other seat thinks.
+      var entrance = negEntrance(view, "offer", 320);
+      var slide = (1 - entrance) * w * 0.06 *
+        (table.standing.side === 0 ? -1 : 1);
+      ctx.save();
+      ctx.globalAlpha = 0.4 + 0.6 * entrance;
+      negPoolRow(ctx, w * 0.27 + slide, rowY, w * 0.4, shareA,
         HEX[C.seatColor(sides[0])], scale, narrow);
-      negPoolRow(ctx, w * 0.73, rowY, w * 0.4, shareB,
+      negPoolRow(ctx, w * 0.73 + slide, rowY, w * 0.4, shareB,
         HEX[C.seatColor(sides[1])], scale, narrow);
       var worth = table.standing.worth || [0, 0];
       var byside = table.standing.side === 0 ?
         [worth[0], worth[1]] : [worth[1], worth[0]];
-      negChip(ctx, "worth " + byside[0], w * 0.27, rowY + h * 0.16,
+      negChip(ctx, "worth " + byside[0], w * 0.27 + slide, rowY + h * 0.16,
         HEX[C.seatColor(sides[0])], scale);
-      negChip(ctx, "worth " + byside[1], w * 0.73, rowY + h * 0.16,
+      negChip(ctx, "worth " + byside[1], w * 0.73 + slide, rowY + h * 0.16,
         HEX[C.seatColor(sides[1])], scale);
+      ctx.restore();
       ctx.save();
       ctx.strokeStyle = "rgba(242, 232, 216, 0.22)";
       ctx.lineWidth = 2;
@@ -440,7 +475,7 @@
     }
 
     if (table.outcome && table.outcome !== "open") {
-      negStamp(ctx, table, scale);
+      negStamp(ctx, table, scale, negEntrance(view, "matchEnd", 260));
     }
   }
 
