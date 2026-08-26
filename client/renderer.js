@@ -397,11 +397,15 @@
 
     // The remark band, reserved before anything is drawn into it: the pool
     // row below it starts under the band, so the stage does not jump when a
-    // remark lands and the pool never sits on top of one.
-    var talkW = w * 0.3;
+    // remark lands and the pool never sits on top of one. The band is
+    // wider than the cog's own column (it may lean in towards the table)
+    // and may push the pool row as far as 0.72h, which is the room the cap
+    // needs at a legible size.
+    var talkW = w * 0.42;
+    var talkX = [w * 0.24, w * 0.76];
     var talkTop = cogY + cog * 0.72 + 24 * scale;
     var band = negTalkBand(ctx, talkW, scale,
-      Math.max(24 * scale, h * 0.66 - 20 * scale - talkTop));
+      Math.max(24 * scale, h * 0.72 - 20 * scale - talkTop));
     var rowY = Math.min(h * 0.72,
       Math.max(h * 0.66, talkTop + band.height + 20 * scale));
 
@@ -433,7 +437,7 @@
         var talkLines = negWrapLines(ctx, "“" + talk + "”", talkW);
         ctx.restore();
         for (var t = 0; t < talkLines.length; t++) {
-          negLabel(ctx, talkLines[t], xs[s],
+          negLabel(ctx, talkLines[t], talkX[s],
             talkTop + band.lineH * (t + 0.5), {
               font: negFont(band.px), color: GHOST, maxWidth: talkW
             });
