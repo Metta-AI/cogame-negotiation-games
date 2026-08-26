@@ -764,18 +764,22 @@ proc replayMatch*(config: GameConfig, events: seq[GameEvent]): seq[Sim] =
         raise newException(NegotiationError,
           "match " & $event.match & " does not match the seeded schedule")
     of evOffer:
+      ## An apply can append more than one event (the turn cliff settles the
+      ## match, and the last match's settlement ends the episode), so the
+      ## re-derived action is found by INDEX, never by counting back from
+      ## the tail.
+      let at = sim.events.len
       sim.applyOffer(event.match, fromSeq3(event.take), event.text,
         event.notes, event.scripted)
-      var logged = sim.events[^1]
-      if logged.kind == evMatchEnd:
-        logged = sim.events[^2]
+      let logged = sim.events[at]
       if event.worth.len > 0 and event.worth != logged.worth:
         raise newException(NegotiationError,
           "match " & $event.match & " turn " & $event.turn &
           " offer worth does not match the seeded valuations")
     of evAccept:
+      let at = sim.events.len
       sim.applyAccept(event.match, event.text, event.notes, event.scripted)
-      let logged = sim.events[^2]
+      let logged = sim.events[at]
       if (event.take.len > 0 and event.take != logged.take) or
           (event.payoff.len > 0 and event.payoff != logged.payoff):
         raise newException(NegotiationError,

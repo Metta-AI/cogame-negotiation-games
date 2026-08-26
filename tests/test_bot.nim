@@ -6,7 +6,7 @@
 ## every order they emit must be legal and bounded, and the two of them must
 ## not be interchangeable.
 
-import std/[json, math, monotimes, os, strutils, times, unittest]
+import std/[json, monotimes, os, times, unittest]
 import negotiation/[llm, sim]
 
 const Seeds = [1, 7, 42, 1234, 20260826]
