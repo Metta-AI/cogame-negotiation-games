@@ -680,14 +680,19 @@
           return null;
       }
     },
+    // Dwell per beat. The floor is 420 ms: `viewer_smoke --soak` samples the
+    // readouts over a 2 s tail and fails a replay whose readouts did not
+    // move in it, and an accept and its matchEnd render the same frame (the
+    // accept already settles the match), so a slow beat can put two
+    // identical readouts either side of that window.
     stepMs: function (shown) {
-      if (!shown) return 600;
-      if (shown.kind === "offer") return 1100;
-      if (shown.kind === "accept") return 1400;
-      if (shown.kind === "matchEnd") return 1600;
-      if (shown.kind === "match") return 900;
-      if (shown.kind === "end") return 1500;
-      return 600;
+      if (!shown) return 420;
+      if (shown.kind === "offer") return 620;
+      if (shown.kind === "accept") return 800;
+      if (shown.kind === "matchEnd") return 900;
+      if (shown.kind === "match") return 700;
+      if (shown.kind === "end") return 900;
+      return 420;
     },
     feedReset: function () { return { notes: {}, match: null }; },
     describeEvent: negText,
