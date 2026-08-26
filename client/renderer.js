@@ -333,16 +333,34 @@
     ctx.fill();
     ctx.stroke();
     ctx.restore();
-    negLabel(ctx, deal ? "DEAL" : "NO DEAL", w / 2, h * 0.44, {
+    var lines = [];
+    if (deal) {
+      lines.push(payoff[0] + " – " + payoff[1]);
+      var splitA = negShare(table, 0);
+      var splitB = negShare(table, 1);
+      if (splitA && splitB) {
+        lines.push("SPLIT " + splitA.join(" · ") + "  vs  " +
+          splitB.join(" · ") + "   (" + ITEM_SHORT.join(" · ") + ")");
+      }
+    } else {
+      lines.push("0 – 0");
+      lines.push(table.maxTurns + " TURNS, NO AGREEMENT");
+    }
+    negLabel(ctx, deal ? "DEAL" : "NO DEAL", w / 2, h * 0.5 - bh * 0.24, {
       font: negFont(Math.min(52 * scale, w * 0.12), 700),
       color: deal ? HEX.green : HEX.red,
       maxWidth: w * 0.7
     });
-    negLabel(ctx, deal ? (payoff[0] + " – " + payoff[1]) :
-      (table.maxTurns + " TURNS, NO AGREEMENT"), w / 2, h * 0.57, {
+    negLabel(ctx, lines[0], w / 2, h * 0.5 + bh * 0.08, {
       font: negFont(Math.min(22 * scale, w * 0.055), 700),
       color: PAPER, maxWidth: w * 0.7
     });
+    if (lines.length > 1) {
+      negLabel(ctx, lines[1], w / 2, h * 0.5 + bh * 0.33, {
+        font: negFont(Math.min(13 * scale, w * 0.032), 600),
+        color: PAPER, maxWidth: w * 0.66
+      });
+    }
     ctx.restore();
   }
 
@@ -650,6 +668,22 @@
     return parts.length ? parts.join(", ") : "nothing";
   }
 
+  // "Sprocket 25 pts (0.62) · Gizmo 18 pts (0.45) · …" — the same points and
+  // score the results carry, accumulated from the feed's own matchEnd
+  // payoffs (score = points / (10 · matches that seat played)).
+  function negFinalTotals(ctx, nameMap) {
+    var parts = [];
+    Object.keys(ctx.points).map(Number).sort(function (a, b) {
+      return a - b;
+    }).forEach(function (seat) {
+      var played = ctx.played[seat] || 0;
+      var score = played ? ctx.points[seat] / (10 * played) : 0;
+      parts.push(C.clampName(nameMap.seat(seat)) + " " + ctx.points[seat] +
+        " pts (" + score.toFixed(2) + ")");
+    });
+    return parts.join(" · ");
+  }
+
   function negText(event, nameMap, ctx) {
     var who = function (i) { return C.clampName(nameMap.seat(i)); };
     var gear = event.scripted ? " ⚙" : "";
@@ -670,12 +704,19 @@
         return who(event.seat) + " ACCEPTS — DEAL " +
           (event.payoff || [0, 0]).join("–") + gear;
       case "matchEnd":
+        var settled = (ctx.match && ctx.match.seats) || [];
+        var paid = event.payoff || [0, 0];
+        for (var s = 0; s < settled.length && s < 2; s++) {
+          ctx.points[settled[s]] = (ctx.points[settled[s]] || 0) +
+            (paid[s] || 0);
+          ctx.played[settled[s]] = (ctx.played[settled[s]] || 0) + 1;
+        }
         if (event.outcome === "deal") {
           return "Match settled — " + (event.payoff || [0, 0]).join("–");
         }
         return "NO DEAL — " + event.turn + " turns, 0–0";
       case "end":
-        return "Final — " + (event.match || 0) + " matches played" +
+        return "Final — " + negFinalTotals(ctx, nameMap) +
           (event.text === "deadline" ? " (episode deadline)." : ".");
       default:
         return JSON.stringify(event);
@@ -811,7 +852,9 @@
       if (shown.kind === "end") return 900;
       return 420;
     },
-    feedReset: function () { return { notes: {}, match: null }; },
+    feedReset: function () {
+      return { notes: {}, match: null, points: {}, played: {} };
+    },
     describeEvent: negText,
     feedClass: negFeedClass,
     extraFeedLines: negExtras,
