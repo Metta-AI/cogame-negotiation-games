@@ -40,7 +40,9 @@
 (function () {
   "use strict";
   var WIDTHS = [360, 720, 1280];
-  var SEEKS = [0.45, 0.92];
+  var SEEKS = [0.2, 0.45, 0.7, 0.92];
+  var DRAWS_PER_STATE = 15;
+  var STATE_BUDGET_MS = 6000;
   var DEADLINE_MS = 100000;
   var REPLAY = "./fixture_replay.json";
   var note = document.getElementById("note");
@@ -49,7 +51,7 @@
 
   // ---- text bounds, measured inside the iframe ----------------------------
   var tally = new Map();
-  var totals = { total: 0, outside: 0, ellipsized: 0 };
+  var totals = { total: 0, outside: 0, ellipsized: 0, longest: 0 };
 
   function measure(ctx, text, x, y) {
     var canvas = ctx.canvas;
@@ -69,6 +71,7 @@
     totals.total += 1;
     if (edges.length) totals.outside += 1;
     if (/…$/.test(text)) totals.ellipsized += 1;
+    totals.longest = Math.max(totals.longest, text.length);
     var entry = tally.get(text);
     if (!entry) {
       entry = { inside: 0, out: 0, edges: "", box: null, canvas: null };
@@ -189,14 +192,49 @@
     });
   }
 
+  // Waiting on a fixed sleep measures whatever the iframe's animation frame
+  // rate happened to give us (26 strings over three widths, run
+  // 33021384622 - a text gate that covers one idle frame). Wait on the
+  // COUNTER instead: keep going until this state has actually been painted,
+  // and fail if it never is.
+  function paint(want, budgetMs) {
+    var mark = totals.total;
+    var startedAt = Date.now();
+    return new Promise(function (resolve, reject) {
+      var timer = window.setInterval(function () {
+        if (totals.total - mark >= want) {
+          window.clearInterval(timer);
+          resolve();
+          return;
+        }
+        if (Date.now() - startedAt > budgetMs) {
+          window.clearInterval(timer);
+          if (totals.total - mark <= 0) {
+            reject(new Error("the shipped page drew no canvas text in " +
+              budgetMs + " ms"));
+          } else {
+            resolve();
+          }
+        }
+      }, 80);
+    });
+  }
+
   function exercise(width) {
-    // Play a little, then seek across the replay so the mid-match offer
-    // chrome, the deal stamp and the no-deal stamp all get drawn at this
-    // width.
-    return waitForFrame(width)
-      .then(function () { return sleep(1500); })
-      .then(function () { seek(SEEKS[0]); return sleep(1200); })
-      .then(function () { seek(SEEKS[1]); return sleep(1500); });
+    // Seek across the whole replay at this width so the mid-match offer
+    // chrome, the full-cap table talk, the deal stamp and the no-deal stamp
+    // are all painted here, and wait for each of them to be painted.
+    var chain = waitForFrame(width)
+      .then(function () { return paint(DRAWS_PER_STATE, STATE_BUDGET_MS); });
+    SEEKS.forEach(function (fraction) {
+      chain = chain.then(function () {
+        seek(fraction);
+        return sleep(150);
+      }).then(function () {
+        return paint(DRAWS_PER_STATE, STATE_BUDGET_MS);
+      });
+    });
+    return chain;
   }
 
   function selfCheck() {
@@ -243,13 +281,21 @@
     });
     return chain;
   }).then(function () {
-    if (totals.total === 0) {
-      throw new Error("the canvas text hook counted zero draws inside the " +
-        "iframe: --strict-text-bounds would be measuring nothing");
+    if (totals.total < 40) {
+      throw new Error("the canvas text hook counted only " + totals.total +
+        " draws inside the iframe: --strict-text-bounds would be measuring " +
+        "almost nothing");
+    }
+    if (totals.ellipsized === 0) {
+      throw new Error("no drawn string was ellipsized: the full-cap table " +
+        "talk never reached the canvas, so this fixture did not gate the " +
+        "message chrome it exists for");
     }
     note.textContent = "renderer fixture OK — " + WIDTHS.join(" / ") +
       " px, " + totals.total + " canvas strings drawn, " +
-      window.__coworldTextBounds.report().never_inside + " never inside";
+      totals.ellipsized + " ellipsized, longest " + totals.longest +
+      " chars, " + window.__coworldTextBounds.report().never_inside +
+      " never inside";
     document.documentElement.setAttribute("data-replay-loaded", "true");
   }).catch(function (error) {
     fail(String(error && error.message || error));

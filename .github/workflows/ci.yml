@@ -381,7 +381,7 @@ jobs:
           mkdir -p "$PWD/dist/fixture"
           node tools/ci/viewer_smoke.mjs \
             --url "http://127.0.0.1:8099/renderer_fixture.html" \
-            --timeout 120 \
+            --timeout 180 \
             --strict-text-bounds \
             --out "$PWD/dist/fixture"
 
