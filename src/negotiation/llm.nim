@@ -201,10 +201,6 @@ proc scriptedDecision*(sim: Sim, baseline: string): Decision =
   result.action = "offer"
   result.take = bestOffer(plan.pool, values, reservation)
 
-proc scriptedAction*(client: LlmClient, sim: Sim, baseline: string):
-    Decision {.inline.} =
-  scriptedDecision(sim, baseline)
-
 # ---- Prompt building --------------------------------------------------------
 
 const SystemPromptTemplate = """You are $1, a cog at a three-seat negotiation table. Right now you are bargaining
