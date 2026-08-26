@@ -1,0 +1,7 @@
+services:
+  game:
+    image: coworld-negotiation-games:latest
+    platform: linux/amd64
+    build:
+      context: .
+      network: host

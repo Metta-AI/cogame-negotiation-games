@@ -1,0 +1,31 @@
+[
+  {
+    "name": "negotiation-games-anchor",
+    "run": "/bin/negotiation-player",
+    "env": {
+      "PLAYER_PROMPT": "Open by taking everything and say why: name the one item you claim to need most. Concede in small steps, one item at a time, and always concede the item that is worth least to you per unit - never the item you value most. Track what your opponent keeps asking for; that is what they value, so charge them for it and take the rest. Accept when the standing offer is worth 6 or more to you, or when three or fewer turns remain and it is worth 4 or more. On the last turn available to you, accept anything worth 1 or more: a deal you dislike still beats the zero that both of you get when the turns run out."
+    }
+  },
+  {
+    "name": "negotiation-games-integrative",
+    "run": "/bin/negotiation-player",
+    "env": {
+      "PLAYER_PROMPT": "The pool is worth 10 to each of you, but you value different things, so there is almost always a split that beats a 50/50 hack. Say plainly and honestly, in your first message, which item type matters most to you and which you barely care about, and ask them for the same - truthful cheap talk is how you find the trade. Then offer: take all of the item you value most, give away all of the item you value least, and split the rest. If their counter contradicts what they said, believe the counter. Accept the standing offer when it is worth 7 or more, or when it is worth 5 or more and fewer than four turns remain. Never let a match end with no deal: on your final turn accept anything worth 1 or more."
+    },
+    "player": "ply_bac48eb1-662e-44f8-973d-f3e016dccf5d"
+  },
+  {
+    "name": "negotiation-games-haggler",
+    "run": "/bin/negotiation-player",
+    "env": {
+      "PLAYER_SCRIPTED": "haggler"
+    }
+  },
+  {
+    "name": "negotiation-games-hardliner",
+    "run": "/bin/negotiation-player",
+    "env": {
+      "PLAYER_SCRIPTED": "hardliner"
+    }
+  }
+]

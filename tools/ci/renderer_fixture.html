@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>negotiation-games renderer fixture</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #120d09; color: #f2e8d8;
+    font: 12px/1.4 system-ui, sans-serif; }
+  #note { padding: 6px 10px; }
+  #frame { display: block; border: 0; height: 620px; width: 1280px; }
+</style>
+</head>
+<body>
+<!--
+  Worst-case renderer fixture (design note §Tests item 25).
+
+  It LOADS THE SHIPPED PAGE — dist/static-replay-viewer/index.html, the real
+  chrome, the real game block and the real wasm module — in an iframe, and
+  feeds it a replay rewritten by tools/ci/make_fixture_replay.py to carry a
+  full-cap 200-rune message and a full-cap 400-rune note on every action of
+  every seat, plus both stamps (a deal and a no-deal that ran the full turn
+  cliff). Scripted replays carry no LLM text at all, so this is the only
+  gate on the message/notes chrome, and it must execute the shipped page
+  rather than re-implement it (particle-worlds, 2026-08-26).
+
+  It is driven by tools/ci/viewer_smoke.mjs --url … --strict-text-bounds,
+  which hooks fillText in every frame; this page mirrors the iframe's load
+  signal onto its own <html> so the harness can see it.
+-->
+<div id="note">renderer fixture — loading…</div>
+<iframe id="frame" src="about:blank"></iframe>
+<script>
+(function () {
+  "use strict";
+  var WIDTHS = [360, 720, 1280];
+  var DEADLINE_MS = 70000;
+  var REPLAY = "./fixture_replay.json";
+  var note = document.getElementById("note");
+  var frame = document.getElementById("frame");
+  var started = Date.now();
+
+  function fail(message) {
+    note.textContent = "renderer fixture FAILED: " + message;
+    document.documentElement.setAttribute("data-replay-error", message);
+  }
+
+  function inner() {
+    try { return frame.contentDocument; } catch (e) { return null; }
+  }
+
+  function waitForFrame(width) {
+    return new Promise(function (resolve, reject) {
+      frame.style.width = width + "px";
+      frame.src = "./index.html?w=" + width + "&replay=" +
+        encodeURIComponent(REPLAY);
+      var timer = window.setInterval(function () {
+        var doc = inner();
+        if (!doc) return;
+        var root = doc.documentElement;
+        var error = root.getAttribute("data-replay-error");
+        if (error) {
+          window.clearInterval(timer);
+          reject(new Error("at " + width + "px the shipped page reported: " +
+            error));
+          return;
+        }
+        if (root.getAttribute("data-replay-loaded") === "true") {
+          window.clearInterval(timer);
+          // Let the page paint a handful of frames at this width so the
+          // stamps, the offer split and the table talk all get drawn.
+          window.setTimeout(resolve, 1200);
+          return;
+        }
+        if (Date.now() - started > DEADLINE_MS) {
+          window.clearInterval(timer);
+          reject(new Error("the shipped page never signalled at " + width +
+            "px"));
+        }
+      }, 120);
+    });
+  }
+
+  function selfCheck() {
+    return fetch(REPLAY).then(function (response) {
+      if (!response.ok) throw new Error("fixture replay " + response.status);
+      return response.json();
+    }).then(function (replay) {
+      var events = replay.events || [];
+      var longest = 0;
+      var longestNote = 0;
+      var stamps = {};
+      events.forEach(function (event) {
+        if (event.text) {
+          longest = Math.max(longest, Array.from(event.text).length);
+        }
+        if (event.notes) {
+          longestNote = Math.max(longestNote, Array.from(event.notes).length);
+        }
+        if (event.kind === "matchEnd") stamps[event.outcome] = true;
+      });
+      if (longest !== 200) {
+        throw new Error("fixture message is " + longest +
+          " runes, expected the 200-rune cap");
+      }
+      if (longestNote !== 400) {
+        throw new Error("fixture notes are " + longestNote +
+          " runes, expected the 400-rune cap");
+      }
+      if (!stamps.deal || !stamps.no_deal) {
+        throw new Error("fixture must carry both a deal and a no_deal stamp");
+      }
+      return { message: longest, notes: longestNote };
+    });
+  }
+
+  selfCheck().then(function (sizes) {
+    var chain = Promise.resolve();
+    WIDTHS.forEach(function (width) {
+      chain = chain.then(function () {
+        note.textContent = "renderer fixture — " + width + "px, message " +
+          sizes.message + " runes, notes " + sizes.notes + " runes";
+        return waitForFrame(width);
+      });
+    });
+    return chain;
+  }).then(function () {
+    note.textContent = "renderer fixture OK — " + WIDTHS.join(" / ") + " px";
+    document.documentElement.setAttribute("data-replay-loaded", "true");
+  }).catch(function (error) {
+    fail(String(error && error.message || error));
+  });
+})();
+</script>
+</body>
+</html>
