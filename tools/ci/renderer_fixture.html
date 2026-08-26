@@ -14,18 +14,25 @@
 <!--
   Worst-case renderer fixture (design note §Tests item 25).
 
-  It LOADS THE SHIPPED PAGE — dist/static-replay-viewer/index.html, the real
-  chrome, the real game block and the real wasm module — in an iframe, and
+  It LOADS THE SHIPPED PAGE - dist/static-replay-viewer/index.html, the real
+  chrome, the real game block and the real wasm module - in an iframe, and
   feeds it a replay rewritten by tools/ci/make_fixture_replay.py to carry a
   full-cap 200-rune message and a full-cap 400-rune note on every action of
-  every seat, plus both stamps (a deal and a no-deal that ran the full turn
+  every seat, plus both stamps (a deal, and a no-deal that ran the full turn
   cliff). Scripted replays carry no LLM text at all, so this is the only
   gate on the message/notes chrome, and it must execute the shipped page
   rather than re-implement it (particle-worlds, 2026-08-26).
 
-  It is driven by tools/ci/viewer_smoke.mjs --url … --strict-text-bounds,
-  which hooks fillText in every frame; this page mirrors the iframe's load
-  signal onto its own <html> so the harness can see it.
+  It is driven by `viewer_smoke.mjs --url … --strict-text-bounds`, which
+  reads two things off the TOP-LEVEL document: the load signal, and
+  window.__coworldTextBounds.report(). A child frame has its own window, so
+  neither the harness's own fillText hook nor its counters reach the page
+  under test. This fixture therefore installs its own measuring hook on the
+  IFRAME's CanvasRenderingContext2D (same origin, so the prototype is
+  reachable), tallies every drawn string against its canvas, and publishes
+  the merged report at the top level in exactly the shape the harness
+  expects. It fails loudly if that hook ever counted zero draws - a text
+  gate that silently measures nothing is worse than no gate.
 -->
 <div id="note">renderer fixture — loading…</div>
 <iframe id="frame" src="about:blank"></iframe>
@@ -33,27 +40,131 @@
 (function () {
   "use strict";
   var WIDTHS = [360, 720, 1280];
-  var DEADLINE_MS = 70000;
+  var SEEKS = [0.45, 0.92];
+  var DEADLINE_MS = 100000;
   var REPLAY = "./fixture_replay.json";
   var note = document.getElementById("note");
   var frame = document.getElementById("frame");
   var started = Date.now();
 
+  // ---- text bounds, measured inside the iframe ----------------------------
+  var tally = new Map();
+  var totals = { total: 0, outside: 0, ellipsized: 0 };
+
+  function measure(ctx, text, x, y) {
+    var canvas = ctx.canvas;
+    if (!canvas || !canvas.width || !canvas.height || !text) return;
+    var metrics = ctx.measureText(text);
+    // actualBoundingBox* is relative to the alignment point, so it already
+    // accounts for textAlign and textBaseline.
+    var left = x - (metrics.actualBoundingBoxLeft || 0);
+    var right = x + (metrics.actualBoundingBoxRight || metrics.width || 0);
+    var top = y - (metrics.actualBoundingBoxAscent || 0);
+    var bottom = y + (metrics.actualBoundingBoxDescent || 0);
+    var edges = [];
+    if (left < -1) edges.push("left");
+    if (top < -1) edges.push("top");
+    if (right > canvas.width + 1) edges.push("right");
+    if (bottom > canvas.height + 1) edges.push("bottom");
+    totals.total += 1;
+    if (edges.length) totals.outside += 1;
+    if (/…$/.test(text)) totals.ellipsized += 1;
+    var entry = tally.get(text);
+    if (!entry) {
+      entry = { inside: 0, out: 0, edges: "", box: null, canvas: null };
+      tally.set(text, entry);
+    }
+    if (edges.length) {
+      entry.out += 1;
+      entry.edges = edges.join("+");
+      entry.box = [Math.round(left), Math.round(top), Math.round(right),
+        Math.round(bottom)];
+      entry.canvas = [canvas.width, canvas.height];
+    } else {
+      entry.inside += 1;
+    }
+  }
+
+  function install(win) {
+    if (!win) return false;
+    var proto = win.CanvasRenderingContext2D &&
+      win.CanvasRenderingContext2D.prototype;
+    if (!proto || proto.__negTextHooked) return false;
+    proto.__negTextHooked = true;
+    ["fillText", "strokeText"].forEach(function (name) {
+      var original = proto[name];
+      proto[name] = function (text, x, y) {
+        try { measure(this, String(text), x, y); } catch (ignore) {}
+        return original.apply(this, arguments);
+      };
+    });
+    return true;
+  }
+
+  window.__coworldTextBounds = {
+    report: function () {
+      var never = [];
+      tally.forEach(function (entry, text) {
+        if (entry.out > 0 && entry.inside === 0) {
+          never.push({
+            kind: "never-inside", edges: entry.edges,
+            text: text.slice(0, 60), box: entry.box, canvas: entry.canvas,
+            draws: entry.out
+          });
+        }
+      });
+      return {
+        total: totals.total,
+        outside: totals.outside,
+        ellipsized: totals.ellipsized,
+        never_inside: never.length,
+        never_inside_samples: never.slice(0, 12),
+        distinct_capped: false,
+        samples: []
+      };
+    }
+  };
+
+  // ---- driving the shipped page -------------------------------------------
   function fail(message) {
     note.textContent = "renderer fixture FAILED: " + message;
     document.documentElement.setAttribute("data-replay-error", message);
   }
 
   function inner() {
-    try { return frame.contentDocument; } catch (e) { return null; }
+    try { return frame.contentDocument; } catch (error) { return null; }
+  }
+
+  function sleep(ms) {
+    return new Promise(function (resolve) { window.setTimeout(resolve, ms); });
+  }
+
+  function seek(fraction) {
+    var doc = inner();
+    if (!doc) return;
+    var view = doc.defaultView;
+    var scrub = doc.getElementById("scrub");
+    if (!scrub || !view || !view.PointerEvent) return;
+    var rect = scrub.getBoundingClientRect();
+    if (!rect.width) return;
+    scrub.dispatchEvent(new view.PointerEvent("pointerdown", {
+      clientX: rect.left + rect.width * fraction,
+      clientY: rect.top + rect.height / 2,
+      bubbles: true, cancelable: true, pointerId: 1
+    }));
+    scrub.dispatchEvent(new view.PointerEvent("pointerup", {
+      bubbles: true, cancelable: true, pointerId: 1
+    }));
   }
 
   function waitForFrame(width) {
     return new Promise(function (resolve, reject) {
       frame.style.width = width + "px";
+      frame.onload = function () { install(frame.contentWindow); };
       frame.src = "./index.html?w=" + width + "&replay=" +
         encodeURIComponent(REPLAY);
       var timer = window.setInterval(function () {
+        install(frame.contentWindow);
         var doc = inner();
         if (!doc) return;
         var root = doc.documentElement;
@@ -66,9 +177,7 @@
         }
         if (root.getAttribute("data-replay-loaded") === "true") {
           window.clearInterval(timer);
-          // Let the page paint a handful of frames at this width so the
-          // stamps, the offer split and the table talk all get drawn.
-          window.setTimeout(resolve, 1200);
+          resolve();
           return;
         }
         if (Date.now() - started > DEADLINE_MS) {
@@ -76,8 +185,18 @@
           reject(new Error("the shipped page never signalled at " + width +
             "px"));
         }
-      }, 120);
+      }, 100);
     });
+  }
+
+  function exercise(width) {
+    // Play a little, then seek across the replay so the mid-match offer
+    // chrome, the deal stamp and the no-deal stamp all get drawn at this
+    // width.
+    return waitForFrame(width)
+      .then(function () { return sleep(1500); })
+      .then(function () { seek(SEEKS[0]); return sleep(1200); })
+      .then(function () { seek(SEEKS[1]); return sleep(1500); });
   }
 
   function selfCheck() {
@@ -86,30 +205,30 @@
       return response.json();
     }).then(function (replay) {
       var events = replay.events || [];
-      var longest = 0;
-      var longestNote = 0;
+      var message = 0;
+      var notes = 0;
       var stamps = {};
       events.forEach(function (event) {
         if (event.text) {
-          longest = Math.max(longest, Array.from(event.text).length);
+          message = Math.max(message, Array.from(event.text).length);
         }
         if (event.notes) {
-          longestNote = Math.max(longestNote, Array.from(event.notes).length);
+          notes = Math.max(notes, Array.from(event.notes).length);
         }
         if (event.kind === "matchEnd") stamps[event.outcome] = true;
       });
-      if (longest !== 200) {
-        throw new Error("fixture message is " + longest +
+      if (message !== 200) {
+        throw new Error("fixture message is " + message +
           " runes, expected the 200-rune cap");
       }
-      if (longestNote !== 400) {
-        throw new Error("fixture notes are " + longestNote +
+      if (notes !== 400) {
+        throw new Error("fixture notes are " + notes +
           " runes, expected the 400-rune cap");
       }
       if (!stamps.deal || !stamps.no_deal) {
         throw new Error("fixture must carry both a deal and a no_deal stamp");
       }
-      return { message: longest, notes: longestNote };
+      return { message: message, notes: notes };
     });
   }
 
@@ -119,12 +238,18 @@
       chain = chain.then(function () {
         note.textContent = "renderer fixture — " + width + "px, message " +
           sizes.message + " runes, notes " + sizes.notes + " runes";
-        return waitForFrame(width);
+        return exercise(width);
       });
     });
     return chain;
   }).then(function () {
-    note.textContent = "renderer fixture OK — " + WIDTHS.join(" / ") + " px";
+    if (totals.total === 0) {
+      throw new Error("the canvas text hook counted zero draws inside the " +
+        "iframe: --strict-text-bounds would be measuring nothing");
+    }
+    note.textContent = "renderer fixture OK — " + WIDTHS.join(" / ") +
+      " px, " + totals.total + " canvas strings drawn, " +
+      window.__coworldTextBounds.report().never_inside + " never inside";
     document.documentElement.setAttribute("data-replay-loaded", "true");
   }).catch(function (error) {
     fail(String(error && error.message || error));
