@@ -516,6 +516,7 @@
     if (!state) return "";
     var parts = [];
     var total = state.matches || (config && config.matches) || 0;
+    negScheduled = Math.max(negScheduled, total);
     if (state.gameDone || state.done) {
       parts.push("FINAL");
       parts.push((state.matchesPlayed || 0) + " MATCH" +
@@ -756,13 +757,20 @@
     return lines;
   }
 
+  // How many matches the schedule holds, read off the config the clock is
+  // painted from and off every state's `matches`. The bar is one chip per
+  // SCHEDULED match: in a `deadline` episode the matches that never started
+  // emit no `match` event, and they are exactly the ones a viewer needs to
+  // see as pending.
+  var negScheduled = 0;
+
   // The matchbar: one chip per scheduled match, filled as matches settle.
   // Built from the feed pass (chrome_common calls feedDone at the end of
   // renderFeed, before the scorebug painter).
   function negMatchbar(events, nameMap, limit) {
     var bar = document.getElementById("matchbar");
     if (!bar) return;
-    var total = 0;
+    var total = negScheduled;
     var chips = {};
     events.forEach(function (event, i) {
       if (event.kind === "match") total = Math.max(total, event.match + 1);
@@ -799,6 +807,7 @@
       view.table = state.table || null;
       view.match = typeof state.match === "number" ? state.match : -1;
       view.matches = state.matches || 0;
+      negScheduled = Math.max(negScheduled, view.matches);
       view.matchesPlayed = state.matchesPlayed || 0;
       view.phase = state.phase || "";
       view.reason = state.reason || "";
