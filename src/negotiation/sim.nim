@@ -40,6 +40,10 @@ const
   ShutdownGraceSeconds* = 20
   MaxMessageLen* = 200
   MaxNotesLen* = 400
+  ## The cap on a player container's operator prompt. Measured in runes like
+  ## every other cap here: a byte slice at 4000 lands inside a multi-byte
+  ## rune and rides into the model request body as invalid UTF-8.
+  MaxPromptLen* = 4000
   ## Match m is played by Pairings[m mod 3].
   Pairings* = [[0, 1], [0, 2], [1, 2]]
   ## Used when 32 count draws all miss the 5..7 window; keeps generation
@@ -115,6 +119,9 @@ proc capRunes*(text: string, limit: int): string =
 
 proc cleanNotes*(text: string): string =
   capRunes(text, MaxNotesLen)
+
+proc cleanPrompt*(text: string): string =
+  capRunes(text, MaxPromptLen)
 
 proc cleanMessage*(text: string): string =
   ## ASCII control characters are stripped before the cap (tabs, newlines

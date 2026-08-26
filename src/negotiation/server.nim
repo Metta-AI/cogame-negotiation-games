@@ -23,7 +23,7 @@
 ##                   (prompt max 4000 chars; scripted names a baseline)
 
 import
-  std/[json, locks, os, sets, strutils, tables, times],
+  std/[json, locks, os, sets, strutils, tables, times, unicode],
   bitworld/runtime,
   curly,
   mummy,
@@ -32,7 +32,6 @@ import
   sim
 
 const
-  MaxPromptLen = 4000
   PlayerProtocol = "negotiation.player.v1"
 
 type
@@ -488,9 +487,10 @@ proc websocketHandler(
       try:
         let payload = parseJson(message.data)
         if payload{"type"}.getStr() == "prompt":
-          var prompt = payload{"prompt"}.getStr()
-          if prompt.len > MaxPromptLen:
-            prompt = prompt[0 ..< MaxPromptLen]
+          ## Cut in RUNES (sim.cleanPrompt), like every other string this
+          ## game keeps: the prompt is interpolated verbatim into the model
+          ## request body, and a byte slice can cut a rune in half.
+          let prompt = cleanPrompt(payload{"prompt"}.getStr())
           let scriptedNode = payload{"scripted"}
           var baseline = ""
           if not scriptedNode.isNil:
@@ -503,7 +503,7 @@ proc websocketHandler(
             state.prompts[slot] = prompt
             state.scripted[slot] = baseline
           echo "negotiation: slot ", slot, " delivered a prompt (",
-            prompt.len, " chars",
+            prompt.runeLen, " runes",
             (if baseline.len > 0: ", scripted " & baseline else: ""), ")"
       except CatchableError as error:
         echo "negotiation: ignoring bad player frame: ", error.msg

@@ -456,6 +456,26 @@ suite "12. rune-safe caps":
     check sim.events[^1].notes.runeLen == MaxNotesLen
     check validateUtf8($sim.tableStateJson()) == -1
 
+  test "a multibyte operator prompt caps in runes, not bytes":
+    # The prompt a player container delivers is interpolated verbatim into
+    # the model request body, so a byte slice at MaxPromptLen would send an
+    # invalid UTF-8 fragment upstream.
+    var longPrompt = ""
+    for index in 0 ..< MaxPromptLen + 500:
+      longPrompt.add("é")
+    let prompt = cleanPrompt(longPrompt)
+    check prompt.runeLen == MaxPromptLen
+    check validateUtf8(prompt) == -1
+    check prompt.endsWith("…")
+    check prompt.len > MaxPromptLen        # multibyte: bytes exceed runes
+    # A prompt exactly at the cap is delivered whole.
+    var atCap = ""
+    for index in 0 ..< MaxPromptLen:
+      atCap.add("é")
+    check cleanPrompt(atCap) == atCap
+    check cleanPrompt(atCap).runeLen == MaxPromptLen
+    check validateUtf8(cleanPrompt(atCap)) == -1
+
 suite "13. two name spaces":
   test "policy display names never reach a composed prompt":
     let names = @["ZQXanchorpolicy", "ZQXintegrativepolicy", "ZQXbaseline"]
