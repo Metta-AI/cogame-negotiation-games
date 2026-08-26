@@ -185,11 +185,10 @@ proc fromSeq3(values: seq[int]): array[Items, int] =
 
 # ---- Setup ------------------------------------------------------------------
 
-proc tableNames*(players: seq[PlayerConfig], seed: int): seq[string] =
+proc tableNames*(rng: var Rand, players: seq[PlayerConfig]): seq[string] =
   ## Policy display names never reach the table: every seat plays under an
-  ## anonymous cog name, drawn deterministically from the seed so replays
-  ## and the live table agree.
-  var rng = initRand(int64(seed) * 6779 + 31)
+  ## anonymous cog name, drawn from the episode's one seeded stream so
+  ## replays and the live table agree.
   var pool = @CogNames
   rng.shuffle(pool)
   for index in 0 ..< players.len:
@@ -288,10 +287,10 @@ proc initSim*(config: GameConfig): Sim =
       "matches must be at least " & $MinMatches)
   if config.maxTurns < 2 or config.maxTurns mod 2 != 0:
     raise newException(NegotiationError, "maxTurns must be an even number >= 2")
-  result = Sim(config: config, names: tableNames(config.players, config.seed))
-  ## One stream for everything the seed decides: the aliases above, then the
+  ## One stream for everything the seed decides: the aliases first, then the
   ## whole schedule, drawn before a single decision is made.
   var rng = initRand(int64(config.seed) * 7919 + 17)
+  result = Sim(config: config, names: tableNames(rng, config.players))
   result.schedule = drawSchedule(rng, config.matches)
   result.match = -1
   result.turn = 0
