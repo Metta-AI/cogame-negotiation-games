@@ -90,6 +90,21 @@
 
   function install(win) {
     if (!win) return false;
+    // The shipped shell posts the `coworld-replay` bridge to window.parent,
+    // and viewer_smoke's init script replaces `parent` in EVERY frame with a
+    // stub that forwards straight into Node. So the iframe's own `ready`
+    // was reaching the harness and ending the run 272 ms in, before this
+    // page had driven a single width (run 33021850554: 20 strings measured,
+    // elapsed 272 ms). Replace `parent` again, from out here, with a stub
+    // that swallows it: the ONLY signal the harness may act on is this
+    // page's own data-replay-loaded, set after every width has been drawn
+    // and checked. `parent` is [Replaceable], so the assignment shadows it.
+    try {
+      if (!win.__negParentStubbed) {
+        win.__negParentStubbed = true;
+        win.parent = { postMessage: function () {} };
+      }
+    } catch (ignore) { /* a navigation in flight; the poller retries */ }
     var proto = win.CanvasRenderingContext2D &&
       win.CanvasRenderingContext2D.prototype;
     if (!proto || proto.__negTextHooked) return false;
@@ -166,6 +181,7 @@
       frame.onload = function () { install(frame.contentWindow); };
       frame.src = "./index.html?w=" + width + "&replay=" +
         encodeURIComponent(REPLAY);
+      install(frame.contentWindow);
       var timer = window.setInterval(function () {
         install(frame.contentWindow);
         var doc = inner();
