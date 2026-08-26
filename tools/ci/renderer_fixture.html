@@ -52,6 +52,21 @@
   // ---- text bounds, measured inside the iframe ----------------------------
   var tally = new Map();
   var totals = { total: 0, outside: 0, ellipsized: 0, longest: 0 };
+  // The full-cap remark, read off the replay by selfCheck(). The stage
+  // wraps it across a reserved band, so it reaches the canvas as a run of
+  // consecutive fragments rather than one string: `best` is the longest
+  // such run (breaks count the space the wrap consumed), and `cut` counts
+  // any fragment that came back ellipsized.
+  var remark = { text: "", runes: 0, run: 0, best: 0, cut: 0 };
+
+  function remarkPiece(text) {
+    if (!remark.text) return null;
+    var bare = text.replace(/[\u201C\u201D]/g, "").trim();
+    var cut = /…$/.test(bare);
+    var body = cut ? bare.slice(0, -1) : bare;
+    if (body.length < 4 || remark.text.indexOf(body) < 0) return null;
+    return { body: body, cut: cut };
+  }
 
   function measure(ctx, text, x, y) {
     var canvas = ctx.canvas;
@@ -72,6 +87,14 @@
     if (edges.length) totals.outside += 1;
     if (/…$/.test(text)) totals.ellipsized += 1;
     totals.longest = Math.max(totals.longest, text.length);
+    var piece = remarkPiece(text);
+    if (piece) {
+      if (piece.cut) remark.cut += 1;
+      remark.run += Array.from(piece.body).length + (remark.run ? 1 : 0);
+      remark.best = Math.max(remark.best, remark.run);
+    } else {
+      remark.run = 0;
+    }
     var entry = tally.get(text);
     if (!entry) {
       entry = { inside: 0, out: 0, edges: "", box: null, canvas: null };
@@ -260,11 +283,16 @@
     }).then(function (replay) {
       var events = replay.events || [];
       var message = 0;
+      var messageText = "";
       var notes = 0;
       var stamps = {};
       events.forEach(function (event) {
         if (event.text) {
-          message = Math.max(message, Array.from(event.text).length);
+          var runes = Array.from(event.text).length;
+          if (runes > message) {
+            message = runes;
+            messageText = event.text;
+          }
         }
         if (event.notes) {
           notes = Math.max(notes, Array.from(event.notes).length);
@@ -282,6 +310,8 @@
       if (!stamps.deal || !stamps.no_deal) {
         throw new Error("fixture must carry both a deal and a no_deal stamp");
       }
+      remark.text = messageText;
+      remark.runes = message;
       return { message: message, notes: notes };
     });
   }
@@ -302,16 +332,25 @@
         " draws inside the iframe: --strict-text-bounds would be measuring " +
         "almost nothing");
     }
-    if (totals.ellipsized === 0) {
-      throw new Error("no drawn string was ellipsized: the full-cap table " +
-        "talk never reached the canvas, so this fixture did not gate the " +
-        "message chrome it exists for");
+    // The remark is a SENTENCE: it must reach the canvas whole, wrapped
+    // across its reserved band. Ellipsis stays legal for labels (nameplates,
+    // chips, the pool caption) and is a defect here (checklist item 15).
+    if (remark.cut > 0) {
+      throw new Error(remark.cut + " drawn fragment(s) of the full-cap " +
+        "remark came back ellipsized: a sentence cut with … means the band " +
+        "the stage reserves for it is too small");
+    }
+    if (remark.best < remark.runes) {
+      throw new Error("the full-cap remark reached the canvas as at most " +
+        remark.best + " of " + remark.runes + " runes: the shipped page " +
+        "never drew the whole message the server's cap admits");
     }
     note.textContent = "renderer fixture OK — " + WIDTHS.join(" / ") +
       " px, " + totals.total + " canvas strings drawn, " +
-      totals.ellipsized + " ellipsized, longest " + totals.longest +
-      " chars, " + window.__coworldTextBounds.report().never_inside +
-      " never inside";
+      remark.best + " / " + remark.runes + " remark runes drawn, " +
+      totals.ellipsized + " ellipsized (labels only), longest " +
+      totals.longest + " chars, " +
+      window.__coworldTextBounds.report().never_inside + " never inside";
     document.documentElement.setAttribute("data-replay-loaded", "true");
   }).catch(function (error) {
     fail(String(error && error.message || error));

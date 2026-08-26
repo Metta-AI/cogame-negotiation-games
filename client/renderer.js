@@ -67,6 +67,73 @@
     return label;
   }
 
+  // ---- the remark band -----------------------------------------------------
+  //
+  // A seat's public remark is a SENTENCE, capped server-side at
+  // MaxMessageLen runes (src/negotiation/sim.nim). Ellipsis is a design
+  // choice for labels and a defect for sentences, so the remark is never
+  // cut: it gets a band whose line count is measured from that cap in the
+  // font it is drawn in, reserved whether or not anyone is speaking, and it
+  // wraps inside it. The band's WIDTH is what the seat's half of the stage
+  // allows; its HEIGHT and its font size are derived from the cap.
+  var MAX_MESSAGE_RUNES = 200;
+
+  // The worst case the cap admits: MAX_MESSAGE_RUNES of the widest glyph
+  // this face draws, in words, so wrapping waste is measured too.
+  var TALK_SAMPLE = (function () {
+    var out = "";
+    while (out.length < MAX_MESSAGE_RUNES) out += "MMMMMMMM ";
+    return out.slice(0, MAX_MESSAGE_RUNES);
+  })();
+
+  // Greedy word wrap measured in the ctx's current font. A word wider than
+  // the box is hard-split, so no text is ever dropped.
+  function negWrapLines(ctx, text, maxWidth) {
+    var words = String(text).split(/\s+/);
+    var lines = [];
+    var line = "";
+    for (var i = 0; i < words.length; i++) {
+      var word = words[i];
+      if (!word) continue;
+      while (word.length > 1 && ctx.measureText(word).width > maxWidth) {
+        var cut = word.length;
+        while (cut > 1 && ctx.measureText(word.slice(0, cut)).width > maxWidth) {
+          cut -= 1;
+        }
+        if (line) { lines.push(line); line = ""; }
+        lines.push(word.slice(0, cut));
+        word = word.slice(cut);
+      }
+      var candidate = line ? line + " " + word : word;
+      if (line && ctx.measureText(candidate).width > maxWidth) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = candidate;
+      }
+    }
+    if (line) lines.push(line);
+    return lines;
+  }
+
+  // How many lines the cap needs at `boxW`, and the largest font at which
+  // they still fit in `maxHeight`. Nothing here is sized by eye.
+  function negTalkBand(ctx, boxW, scale, maxHeight) {
+    var px = 10.5 * scale;
+    var lines = 1;
+    ctx.save();
+    for (var guard = 0; guard < 24; guard++) {
+      ctx.font = negFont(px);
+      lines = negWrapLines(ctx, TALK_SAMPLE, boxW).length;
+      if (lines * px * 1.32 <= maxHeight || px <= 6) break;
+      px -= 0.5;
+    }
+    ctx.restore();
+    return {
+      px: px, lineH: px * 1.32, lines: lines, height: lines * px * 1.32
+    };
+  }
+
   function negChip(ctx, text, x, y, accent, scale) {
     ctx.save();
     ctx.font = negFont(11 * scale, 700);
@@ -283,6 +350,16 @@
     var cogY = h * 0.30;
     var xs = [w * 0.15, w * 0.85];
 
+    // The remark band, reserved before anything is drawn into it: the pool
+    // row below it starts under the band, so the stage does not jump when a
+    // remark lands and the pool never sits on top of one.
+    var talkW = w * 0.3;
+    var talkTop = cogY + cog * 0.72 + 24 * scale;
+    var band = negTalkBand(ctx, talkW, scale,
+      Math.max(24 * scale, h * 0.66 - 20 * scale - talkTop));
+    var rowY = Math.min(h * 0.72,
+      Math.max(h * 0.66, talkTop + band.height + 20 * scale));
+
     // The two negotiating cogs, facing each other across the table.
     for (var s = 0; s < 2; s++) {
       var seatIndex = sides[s];
@@ -306,15 +383,20 @@
       });
       var talk = (table.messages || [])[s] || "";
       if (talk) {
-        negLabel(ctx, "“" + talk + "”", xs[s],
-          cogY + cog * 0.72 + 30 * scale, {
-            font: negFont(10.5 * scale), color: GHOST, maxWidth: w * 0.3
-          });
+        ctx.save();
+        ctx.font = negFont(band.px);
+        var talkLines = negWrapLines(ctx, "“" + talk + "”", talkW);
+        ctx.restore();
+        for (var t = 0; t < talkLines.length; t++) {
+          negLabel(ctx, talkLines[t], xs[s],
+            talkTop + band.lineH * (t + 0.5), {
+              font: negFont(band.px), color: GHOST, maxWidth: talkW
+            });
+        }
       }
     }
 
     // The pool, split into the two shares the standing offer would give.
-    var rowY = h * 0.66;
     var shareA = negShare(table, 0);
     var shareB = negShare(table, 1);
     if (!table.standing) {
