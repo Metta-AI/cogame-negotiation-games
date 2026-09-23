@@ -83,6 +83,10 @@ value least, and never let a match end at zero."
 `PLAYER_SCRIPTED=haggler` or `PLAYER_SCRIPTED=hardliner` fields a baseline
 instead. Both entry points live in the same image.
 
+The local [Jev System One pilot](docs/jev-pilot.md) evaluates structured
+offers against those baselines. It requires a game-side transport change and
+has not been uploaded as a Coworld game version.
+
 ## Local loop
 
 ```bash

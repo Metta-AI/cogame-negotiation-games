@@ -15,7 +15,7 @@
 ## `haggler` or `hardliner` plays one deliberately, LLM or not.
 
 import
-  std/[json, math, os, random, strutils],
+  std/[json, math, monotimes, os, random, strutils, times],
   bitworld/runtime,
   curly,
   sim
@@ -43,7 +43,7 @@ type
     fallback*: bool              ## the model path was skipped or gave up
 
   LlmTransport = enum
-    ltNone, ltBedrock, ltAnthropic
+    ltNone, ltBedrock, ltAnthropic, ltJev
 
   LlmClient* = ref object
     curl: Curly
@@ -53,6 +53,9 @@ type
     bedrockModels: seq[string]
     bedrockModel: int
     bedrockToken: string
+    jevEndpoint: string
+    jevKey: string
+    jevTrajectoryId: string
     model: string
     maxOutputTokens: int
     timeoutSeconds: int
@@ -123,6 +126,30 @@ proc newLlmClient*(config: GameConfig): LlmClient =
   )
   let bedrockEndpoint = getEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME").strip()
   let bedrockToken = getEnv("AWS_BEARER_TOKEN_BEDROCK").strip()
+  if getEnv("NEGOTIATION_JEV") == "1":
+    let openRouterKey = getEnv("OPENROUTER_API_KEY").strip()
+    let captureUrl = getEnv("METTA_CAPTURE_URL").strip()
+    if bedrockEndpoint.len == 0 and captureUrl.len == 0 and
+        openRouterKey.len == 0:
+      result.disabled = true
+      echo "negotiation jev: no sidecar, capture proxy, or OpenRouter key; using scripted fallback"
+      return
+    result.transport = ltJev
+    if bedrockEndpoint.len > 0:
+      result.jevEndpoint = bedrockEndpoint.strip(chars = {'/'}, leading = false)
+    elif captureUrl.len > 0:
+      result.jevEndpoint = captureUrl.strip(chars = {'/'}, leading = false)
+      result.jevKey = getEnv("METTA_CAPTURE_KEY")
+      if result.jevKey.len == 0:
+        raise newException(NegotiationError, "METTA_CAPTURE_KEY is required")
+      result.jevTrajectoryId = "negotiation-jev-" & $config.seed
+    else:
+      result.jevEndpoint = "https://openrouter.ai/api"
+      result.jevKey = openRouterKey
+    result.model = "typesafe/jev-1.13"
+    result.curl = newCurly()
+    echo "negotiation jev: System One transport enabled"
+    return
   if bedrockEndpoint.len > 0 or bedrockToken.len > 0:
     let region = getEnv("AWS_REGION",
       getEnv("AWS_DEFAULT_REGION", "us-west-2"))
@@ -454,6 +481,95 @@ proc completeText(client: LlmClient, system, user: string): string =
     raise newException(NegotiationError, "reply cut off at max_tokens before " &
       "any JSON: " & capRunes(result.replace("\n", " "), 160))
 
+proc jevDecision(client: LlmClient, sim: Sim, seat: int, prompt: string): Decision =
+  let plan = sim.plan
+  let side = sim.sideOfSeat(seat)
+  var criteria = newJObject()
+  var candidates: seq[tuple[name: string, decision: Decision]]
+  for reservation in [10, 8, 6, 4, 2]:
+    let take = bestOffer(plan.pool, plan.values[side], reservation)
+    let name = "offer_" & $take[0] & "_" & $take[1] & "_" & $take[2]
+    if criteria.hasKey(name):
+      continue
+    criteria[name] = %("Offer to take " & takeText(take, plan.pool) &
+      ", worth " & $worthOf(plan.values[side], take) &
+      "/10 to you. Your opponent receives the remaining items.")
+    candidates.add((name, Decision(action: "offer", take: take)))
+  let baseline = scriptedDecision(sim, DefaultBaseline)
+  if baseline.action == "offer":
+    let name = "offer_" & $baseline.take[0] & "_" & $baseline.take[1] &
+      "_" & $baseline.take[2]
+    if not criteria.hasKey(name):
+      criteria[name] = %("Reference haggler offers to take " &
+        takeText(baseline.take, plan.pool) & ", worth " &
+        $worthOf(plan.values[side], baseline.take) & "/10 to you.")
+      candidates.add((name, Decision(action: "offer", take: baseline.take)))
+  if sim.acceptLegal:
+    criteria["accept"] = %("Accept the standing offer, worth " &
+      $sim.standingWorthTo(side) & "/10 to you. The match ends now.")
+    candidates.add(("accept", Decision(action: "accept")))
+
+  var headers: HttpHeaders
+  headers["content-type"] = "application/json"
+  if client.jevKey.len > 0:
+    headers["authorization"] = "Bearer " & client.jevKey
+  else:
+    headers["x-coworld-player-slot"] = $seat
+  if client.jevTrajectoryId.len > 0:
+    headers["x-metta-trajectory-id"] = client.jevTrajectoryId
+  let body = %*{
+    "state": systemPrompt(sim, seat) & "\n\n" & userPrompt(sim, seat, prompt),
+    "model": client.model,
+    "questions": {
+      "decision": {
+        "type": "choice",
+        "instructions": "Choose the legal action that maximizes your expected match payoff while preserving a chance of agreement.",
+        "criteria": criteria
+      }
+    }
+  }
+  let started = getMonoTime()
+  let response = client.curl.post(client.jevEndpoint & "/v1/systemone",
+    headers, $body, client.timeoutSeconds)
+  if response.code < 200 or response.code >= 300:
+    raise newException(NegotiationError, "Jev HTTP " & $response.code &
+      ": " & capRunes(response.body, 300))
+  let payload = parseJson(response.body)
+  let answer = payload["answers"]["decision"]
+  let choice = answer["choice"].getStr()
+  let probabilities = answer["probabilities"]
+  if answer["type"].getStr() != "choice" or not criteria.hasKey(choice) or
+      probabilities.len != criteria.len:
+    raise newException(NegotiationError, "Jev returned the wrong choice set")
+  let confidence = answer["confidence"].getFloat()
+  if confidence < 0 or confidence > 1:
+    raise newException(NegotiationError, "Jev confidence is outside [0, 1]")
+  var total = 0.0
+  var chosen = -1.0
+  for name, probability in probabilities.pairs:
+    if not criteria.hasKey(name):
+      raise newException(NegotiationError, "Jev returned an unknown choice")
+    let value = probability.getFloat()
+    if value < 0 or value > 1:
+      raise newException(NegotiationError, "Jev probability is outside [0, 1]")
+    total += value
+    if name == choice: chosen = value
+  if abs(total - 1) > probabilities.len.float * 0.005 + 1e-6 or
+      chosen < 0:
+    raise newException(NegotiationError, "Jev probabilities do not sum to one")
+  for _, probability in probabilities.pairs:
+    if probability.getFloat() > chosen + 1e-6:
+      raise newException(NegotiationError, "Jev choice is not most probable")
+  echo "negotiation jev: seat ", seat, " choice ", choice,
+    " confidence ", confidence, " cost ", payload["usage"]{"cost"}.getFloat(),
+    " latency_ms ", (getMonoTime() - started).inMilliseconds()
+  if confidence < 0.1:
+    return baseline
+  for candidate in candidates:
+    if candidate.name == choice:
+      return candidate.decision
+  raise newException(NegotiationError, "Jev choice has no action")
+
 proc decide*(
   client: LlmClient,
   sim: Sim,
@@ -475,12 +591,16 @@ proc decide*(
     return
   let system = systemPrompt(sim, call.seat)
   for attempt in 0 .. 1:
-    var user = userPrompt(sim, call.seat, prompt)
-    if attempt > 0:
-      user.add(RetryHint)
     try:
-      let payload = extractJsonObject(client.completeText(system, user))
-      var decision = parseAction(sim, payload)
+      var decision: Decision
+      if client.transport == ltJev:
+        decision = client.jevDecision(sim, call.seat, prompt)
+      else:
+        var user = userPrompt(sim, call.seat, prompt)
+        if attempt > 0:
+          user.add(RetryHint)
+        let payload = extractJsonObject(client.completeText(system, user))
+        decision = parseAction(sim, payload)
       ## Reject illegal replies here so the retry carries the hint.
       var probe = sim
       if decision.action == "accept":
