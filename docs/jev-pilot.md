@@ -12,7 +12,7 @@ Set `NEGOTIATION_JEV=1` on the game process. Hosted calls use its Coworld
 sidecar and a player-slot header. Local calls use `OPENROUTER_API_KEY` and
 `typesafe/jev-1.13`. A local System One capture proxy can instead be selected
 with `METTA_CAPTURE_URL` and `METTA_CAPTURE_KEY`; it receives one trajectory ID
-per seed. No game version or hosted policy was uploaded for this pilot.
+per seed.
 
 ## Paired local episodes
 
@@ -63,7 +63,11 @@ on the game process. The proxy stores request and response JSONL lines. The
 game still requires an action-to-outcome join before those lines can become
 post-training examples.
 
-The Jev transport is behind a game-process flag. Deploying it to a hosted
-league requires a new Coworld game version; uploading a prompt-only player to
-the current game would continue to use its existing Claude path. No hosted
-performance claim follows from these local runs.
+The Jev transport is behind a game-process flag. The production canary used a
+new Coworld game version with this flag enabled.
+
+## Hosted production canary
+
+Version `negotiation-games:0.1.2` passed local and hosted Coworld certification. A private production Experience Request (`xreq_427faf94-8a8c-4bc3-b4a0-abaa66c41759`) used relh-owned `relh-negotiation-jev-20260923:v1` in slot 0, a scripted hardliner in slot 1, and a prompt-driven policy in slot 2. It used a $0.05 combined player LLM cap and no ladder submission. The episode completed with scores 0.9, 0.75, and 0.9; total episode cost was $0.017077.
+
+The game log records 11 Jev judgments for slot 0 and five for slot 2, all through the hosted System One sidecar. Slot 0 provider cost was $0.00063735, with 301 ms mean and 425 ms maximum client-observed latency. No scripted fallback was logged. This one episode verifies hosted operation, not a performance gain.
