@@ -68,6 +68,6 @@ new Coworld game version with this flag enabled.
 
 ## Hosted production canary
 
-Version `negotiation-games:0.1.2` passed local and hosted Coworld certification. A private production Experience Request (`xreq_427faf94-8a8c-4bc3-b4a0-abaa66c41759`) used relh-owned `relh-negotiation-jev-20260923:v1` in slot 0, a scripted hardliner in slot 1, and a prompt-driven policy in slot 2. It used a $0.05 combined player LLM cap and no ladder submission. The episode completed with scores 0.9, 0.75, and 0.9; total episode cost was $0.017077.
+Version `negotiation-games:0.1.2` passed local and hosted Coworld certification. A private production Experience Request (`xreq_427faf94-8a8c-4bc3-b4a0-abaa66c41759`) used relh-owned `relh-negotiation-jev-20260923:v1` in slot 0, a scripted hardliner in slot 1, and a prompt-driven policy in slot 2. It used a $0.05 combined player LLM cap and no ladder submission. The episode completed with scores 0.9, 0.75, and 0.9; Kubernetes execution cost was $0.017077, separate from player model spend.
 
 The game log records 11 Jev judgments for slot 0 and five for slot 2, all through the hosted System One sidecar. Slot 0 provider cost was $0.00063735, with 301 ms mean and 425 ms maximum client-observed latency. No scripted fallback was logged. This one episode verifies hosted operation, not a performance gain.
