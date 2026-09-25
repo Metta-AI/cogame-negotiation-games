@@ -32,7 +32,7 @@ import
   sim
 
 const
-  PlayerProtocol = "negotiation.player.v1"
+  PlayerProtocol = "negotiation.player.v2"
 
 type
   GameState = object
@@ -40,6 +40,12 @@ type
     sim: Sim
     prompts: seq[string]
     scripted: seq[string]      ## "" = LLM seat; else the baseline's name
+    external: seq[bool]
+    registered: seq[bool]
+    awaitingSeat: int
+    awaitingEvent: int
+    pendingAction: Decision
+    hasPendingAction: bool
     playerSockets: Table[int, WebSocket]
     socketSlots: Table[WebSocket, int]
     globalSockets: HashSet[WebSocket]
@@ -114,6 +120,43 @@ proc playerStateJson(gs: GameState, slot: int): JsonNode =
     "done": gs.sim.done,
     "reason": gs.sim.reason
   }
+
+proc decisionObservation*(sim: Sim, slot: int): JsonNode =
+  ## The acting seat's private valuation and public bargaining history.
+  ## Opponent values, private notes, and the future schedule stay game-owned.
+  let plan = sim.plan
+  let side = sim.sideOfSeat(slot)
+  var offers = newJArray()
+  for offer in sim.offers:
+    let mine =
+      if offer.side == side: offer.take
+      else: complementOf(plan.pool, offer.take)
+    offers.add(%*{"turn": offer.turn, "side": offer.side,
+      "take": offer.take, "worthToYou": worthOf(plan.values[side], mine),
+      "message": offer.text})
+  var prior = newJArray()
+  for event in sim.events:
+    if event.kind == evMatchEnd:
+      let previousPlan = sim.schedule[event.match]
+      if slot in previousPlan.seats:
+        let previousSide = if previousPlan.seats[0] == slot: 0 else: 1
+        prior.add(%*{"match": event.match, "opponent":
+          sim.names[previousPlan.seats[1 - previousSide]],
+          "outcome": event.outcome, "payoff": event.payoff[previousSide]})
+  var standing = newJNull()
+  if sim.standingSide >= 0 and sim.standingSide != side:
+    let mine = complementOf(plan.pool, sim.standing)
+    standing = %*{"opponentTake": sim.standing,
+      "yourTake": mine, "worthToYou": worthOf(plan.values[side], mine)}
+  %*{"slot": slot, "name": sim.names[slot],
+    "opponent": sim.names[plan.seats[1 - side]],
+    "match": sim.match, "matches": sim.config.matches,
+    "turn": sim.turn, "maxTurns": sim.config.maxTurns,
+    "pool": plan.pool, "yourValues": plan.values[side],
+    "standing": standing, "offers": offers,
+    "opponentMessage": sim.lastMessage[1 - side],
+    "priorMatches": prior, "yourScore": sim.score(slot),
+    "notes": sim.notes[slot], "canAccept": sim.acceptLegal}
 
 proc broadcastLocked(gs: GameState) =
   ## Callers hold stateLock. Spectators get the whole table; players get the
@@ -253,6 +296,17 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
         break
       sleep(200)
 
+    let registerDeadline = epochTime() + 3.0
+    while epochTime() < registerDeadline:
+      var allRegistered = true
+      withLock stateLock:
+        for slot in 0 ..< config.tokens.len:
+          if state.playerSockets.hasKey(slot) and not state.registered[slot]:
+            allRegistered = false
+      if allRegistered:
+        break
+      sleep(20)
+
     withLock stateLock:
       state.started = true
       echo "negotiation: starting with ", state.playerSockets.len, "/",
@@ -290,6 +344,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       var seatPrompt: string
       var seatScripted: string
       var pastDeadline = false
+      var seatExternal = false
       withLock stateLock:
         if state.sim.done:
           break
@@ -319,8 +374,18 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
         simCopy = state.sim
         seatPrompt = state.prompts[call.seat]
         seatScripted = state.scripted[call.seat]
+        seatExternal = state.external[call.seat] and not pastDeadline and
+          state.playerSockets.hasKey(call.seat)
+        if seatExternal:
+          state.awaitingSeat = call.seat
+          state.awaitingEvent = state.sim.events.len
+          state.hasPendingAction = false
+          state.playerSockets[call.seat].send($ %*{
+            "type": "observation", "event": state.awaitingEvent,
+            "observation": state.sim.decisionObservation(call.seat)})
 
-      let useScripted = seatScripted.len > 0 or pastDeadline or client.disabled
+      let useScripted = not seatExternal and
+        (seatScripted.len > 0 or pastDeadline or client.disabled)
       if not useScripted:
         ## Wall-clock floor between model calls: the hosted Bedrock sidecar
         ## caps 30 requests/minute per episode.
@@ -332,8 +397,26 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
 
       ## The slow part (Claude) runs outside the lock on a snapshot; only
       ## this thread mutates the sim, so the snapshot cannot go stale.
-      let decision = client.decide(simCopy, call, seatPrompt,
-        scripted = seatScripted, forceScripted = pastDeadline)
+      var decision: Decision
+      if seatExternal:
+        let actionDeadline = epochTime() + config.llmTimeoutSeconds.float
+        while epochTime() < actionDeadline:
+          var ready = false
+          withLock stateLock:
+            ready = state.hasPendingAction
+          if ready:
+            break
+          sleep(20)
+        withLock stateLock:
+          state.awaitingSeat = -1
+          if state.hasPendingAction:
+            decision = state.pendingAction
+          else:
+            decision = scriptedDecision(simCopy, DefaultBaseline)
+            decision.fallback = true
+      else:
+        decision = client.decide(simCopy, call, seatPrompt,
+          scripted = seatScripted, forceScripted = pastDeadline)
 
       var settledBefore = 0
       var settledAfter = 0
@@ -486,6 +569,28 @@ proc websocketHandler(
         return
       try:
         let payload = parseJson(message.data)
+        if payload{"type"}.getStr() == "register":
+          if payload["control"].getStr() != "external":
+            raise newException(NegotiationError, "unknown player control")
+          withLock stateLock:
+            state.external[slot] = true
+            state.registered[slot] = true
+          return
+        if payload{"type"}.getStr() == "action":
+          withLock stateLock:
+            if state.external[slot] and state.awaitingSeat == slot and
+                state.awaitingEvent == payload["event"].getInt():
+              let decision = parseAction(state.sim, payload["action"])
+              var probe = state.sim
+              if decision.action == "accept":
+                probe.applyAccept(state.sim.match, decision.message,
+                  decision.notes, false)
+              else:
+                probe.applyOffer(state.sim.match, decision.take,
+                  decision.message, decision.notes, false)
+              state.pendingAction = decision
+              state.hasPendingAction = true
+          return
         if payload{"type"}.getStr() == "prompt":
           ## Cut in RUNES (sim.cleanPrompt), like every other string this
           ## game keeps: the prompt is interpolated verbatim into the model
@@ -502,6 +607,8 @@ proc websocketHandler(
           withLock stateLock:
             state.prompts[slot] = prompt
             state.scripted[slot] = baseline
+            state.external[slot] = false
+            state.registered[slot] = true
           echo "negotiation: slot ", slot, " delivered a prompt (",
             prompt.runeLen, " runes",
             (if baseline.len > 0: ", scripted " & baseline else: ""), ")"
@@ -576,6 +683,9 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   state.sim = initSim(config)
   state.prompts = newSeq[string](config.players.len)
   state.scripted = newSeq[string](config.players.len)
+  state.external = newSeq[bool](config.players.len)
+  state.registered = newSeq[bool](config.players.len)
+  state.awaitingSeat = -1
   runtimeConfigGlobal = runtimeConfig
 
   let router = buildRouter(replayMode = false)

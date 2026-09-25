@@ -1,18 +1,11 @@
 # Jev System One negotiation pilot
 
-September 23, 2026. This pilot selects a structured offer or accept action
-from a bounded legal set. The game server makes the System One call because
-player policies in Negotiation Games only deliver a prompt. Jev sees the
-acting seat's own values, public offer history, and operator guidance through
-the existing prompt builder. It never receives the opponent's private values.
-The candidate set contains offers at several own-payoff thresholds, the
-scripted haggler's exact move, and accept when legal. Jev emits no table talk.
-
-Set `NEGOTIATION_JEV=1` on the game process. Hosted calls use its Coworld
-sidecar and a player-slot header. Local calls use `OPENROUTER_API_KEY` and
-`typesafe/jev-1.13`. A local System One capture proxy can instead be selected
-with `METTA_CAPTURE_URL` and `METTA_CAPTURE_KEY`; it receives one trajectory ID
-per seed.
+September 23, 2026. The original pilot used game-side System One calls.
+Those results remain historical evidence. The corrected Jev player sets
+`PLAYER_JEV=1`, receives its own private values and public offer history,
+and sends an offer or acceptance through the normal external action path.
+The game validates the action and owns results and replay. Existing prompt
+and scripted policies remain available.
 
 ## Paired local episodes
 
@@ -43,28 +36,11 @@ OpenRouter variables present; every request carried slot 0 and no bearer key.
 
 ## Reproduce
 
-Generate the ignored `nim.cfg` with the package paths shown in `README.md`,
-then run:
-
-```bash
-nim c -r --path:src tests/test_sim.nim
-nim c -d:release --path:src -o:tmp/jev_eval tools/jev_eval.nim
-NEGOTIATION_JEV=1 OPENROUTER_API_KEY="$APPROVED_KEY" tmp/jev_eval 0
-docker build --platform linux/amd64 -t coworld-negotiation-games:jev-local .
-NEGOTIATION_JEV=1 OPENROUTER_API_KEY="$APPROVED_KEY" \
-  SMOKE_GAME_BIN=/bin/negotiation SMOKE_PLAYER_BIN=/bin/negotiation-player \
-  SMOKE_GAME_LOG_OUT=/tmp/negotiation-jev-game.log \
-  bash tools/ci/docker_smoke.sh coworld-negotiation-games:jev-local
-```
-
-To capture calls, run Metta's `metta_posttrain.capture` proxy with an approved
-OpenRouter inference key, then set `METTA_CAPTURE_URL` and `METTA_CAPTURE_KEY`
-on the game process. The proxy stores request and response JSONL lines. The
-game still requires an action-to-outcome join before those lines can become
-post-training examples.
-
-The Jev transport is behind a game-process flag. The production canary used a
-new Coworld game version with this flag enabled.
+The original `tools/jev_eval.nim` drove the old game-side transport and was
+removed. For the corrected local player path, build the image and run
+`SMOKE_JEV_SLOT=0 TYPESAFE_API_KEY=... tools/ci/docker_smoke.sh <image>`.
+Run the same image without `SMOKE_JEV_SLOT` for a non-Jev control. The old
+production canary below does not validate the corrected protocol.
 
 ## Hosted production canary
 

@@ -23,16 +23,12 @@ binding channel and the only thing that is graded.
 instantly as generous or greedy — and a `DEAL 7–3` / `NO DEAL` stamp closes
 each match.
 
-**The game is LLM-driven and a policy is just a prompt.** Whenever a seat has
-to move, the server sends that seat's policy prompt plus the pool, its own
-private values, the offer standing against it (with the worth to itself
-already computed), this match's full history and its private notes to Claude,
-which answers with an offer or an accept, a message and new notes. Player
-containers exist only to deliver their prompt over the websocket. Two
-built-in **scripted baselines** — a conceding `haggler` and a stubborn
-`hardliner` — play any seat that registers as scripted, and every seat when
-no LLM credentials are available, so episodes (and offline certification)
-always complete.
+**Players can act through a seat observation and offer or accept action.**
+The game shows an external policy the pool, its own private values, the
+standing offer and public history, and its private notes. It validates every
+action and owns scoring and replay. Existing prompt policies use the game’s
+Claude adapter. The built-in `haggler` and `hardliner` policies remain
+available, and offline certification uses their scripted fallback.
 
 Seats play under **anonymous cog names** (Sprocket, Gizmo, …): policy display
 names never reach the agents' prompts, so nobody can meta-game "that seat is
@@ -83,9 +79,8 @@ value least, and never let a match end at zero."
 `PLAYER_SCRIPTED=haggler` or `PLAYER_SCRIPTED=hardliner` fields a baseline
 instead. Both entry points live in the same image.
 
-The local [Jev System One pilot](docs/jev-pilot.md) evaluates structured
-offers against those baselines. It requires a game-side transport change and
-has not been uploaded as a Coworld game version.
+The [Jev System One pilot](docs/jev-pilot.md) records earlier paired results.
+The corrected Jev policy runs in the player through the external action path.
 
 ## Local loop
 
