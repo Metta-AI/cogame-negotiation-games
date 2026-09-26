@@ -79,8 +79,8 @@ value least, and never let a match end at zero."
 `PLAYER_SCRIPTED=haggler` or `PLAYER_SCRIPTED=hardliner` fields a baseline
 instead. Both entry points live in the same image.
 
-The [Jev System One pilot](docs/jev-pilot.md) records earlier paired results.
-The corrected Jev policy runs in the player through the external action path.
+External policies use the same private seat observation and complete action
+path. The game owns legality, fallback, results, and replay.
 
 ## Local loop
 

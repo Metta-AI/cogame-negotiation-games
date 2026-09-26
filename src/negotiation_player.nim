@@ -16,7 +16,6 @@
 
 import
   std/[json, options, os, strutils],
-  negotiation/jev_policy,
   whisky
 
 const DefaultPrompt = """
@@ -38,13 +37,9 @@ when isMainModule:
   if prompt.len == 0:
     prompt = DefaultPrompt
   let scripted = getEnv("PLAYER_SCRIPTED").strip()
-  let jev = getEnv("PLAYER_JEV") == "1"
 
   proc promptFrame(): string =
-    if jev:
-      $ %*{"type": "register", "control": "external"}
-    else:
-      $ %*{"type": "prompt", "prompt": prompt, "scripted": scripted}
+    $ %*{"type": "prompt", "prompt": prompt, "scripted": scripted}
 
   echo "negotiation player: connecting to game"
   let socket = newWebSocket(url)
@@ -77,10 +72,6 @@ when isMainModule:
         of "final":
           echo "negotiation player: final scores ", payload{"scores"}
           break
-        of "observation":
-          if jev:
-            socket.send($ %*{"type": "action", "event": payload["event"],
-              "action": chooseAction(payload["observation"], prompt)})
         else:
           discard
       except CatchableError as error:
