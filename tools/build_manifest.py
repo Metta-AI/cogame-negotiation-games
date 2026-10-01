@@ -364,12 +364,7 @@ MANIFEST = {
             "type": "game",
             "image": IMAGE,
             "run": ["/bin/negotiation"],
-            "env": {
-                # Without this the hosted container never sees the key and
-                # every league episode silently plays scripted (hive).
-                "ANTHROPIC_API_KEY_URI":
-                    "secret://coworld/negotiation-games/anthropic_api_key"
-            },
+            "env": {},
             "source_url": SOURCE,
         },
         "config_schema": {

@@ -112,14 +112,10 @@ def main() -> int:
     check("episode_timeout_minutes" in document,
           "episode_timeout_minutes must be declared at the top level")
 
-    # ---- the secret namespace equals game.name ----------------------------
-    env = (game.get("runnable") or {}).get("env") or {}
-    uri = env.get("ANTHROPIC_API_KEY_URI")
-    check(uri == f"secret://coworld/{GAME_NAME}/anthropic_api_key",
-          "game.runnable.env.ANTHROPIC_API_KEY_URI must be "
-          f"secret://coworld/{GAME_NAME}/anthropic_api_key — without it the "
-          "hosted container never sees the key and every league episode "
-          f"silently plays scripted (got {uri!r})")
+    # Hosted LLM credentials are owned by the native sidecar.
+    env = game["runnable"]["env"]
+    check("ANTHROPIC_API_KEY_URI" not in env,
+          "hosted games must not request a provider secret")
 
     # ---- config_schema: every array property is bounded -------------------
     schema = game.get("config_schema") or {}
