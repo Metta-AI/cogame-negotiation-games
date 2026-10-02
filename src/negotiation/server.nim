@@ -23,7 +23,8 @@
 ##                   (prompt max 4000 chars; scripted names a baseline)
 
 import
-  std/[json, locks, os, sets, strutils, tables, times, unicode],
+  std/[json, locks, options, os, sets, strutils, tables, times, unicode],
+  bitworld/decision_trajectory,
   bitworld/runtime,
   curly,
   mummy,
@@ -36,6 +37,7 @@ const
 
 type
   GameState = object
+    trajectory: Option[DecisionTrajectory]
     config: GameConfig
     sim: Sim
     prompts: seq[string]
@@ -247,6 +249,12 @@ proc finishEpisode(runtimeConfig: RuntimeConfig) =
       socket.send($final)
     state.broadcastLocked()
 
+  if state.trajectory.isSome:
+    state.trajectory.get().finish(
+      (if state.sim.reason == "deadline": esTruncated else: esCompleted),
+      results, results["scores"])
+    state.trajectory.get().writeEventsToUri(getEnv("COGAME_SAVE_TRAJECTORY_URI"))
+
   sleep(500)
   echo "negotiation: writing results and replay"
   writeArtifact(
@@ -426,6 +434,8 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           state.sim.turn, " ", decisionText(state.sim, decision),
           (if decision.scripted: " [scripted]" else: ""), " at ",
           (epochTime() - gameStart).int, "s"
+        var executed = decision
+        var engineRejected = false
         try:
           if decision.action == "accept":
             state.sim.applyAccept(call.match, decision.message,
@@ -437,6 +447,10 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           echo "negotiation: reply rejected (", error.msg,
             "); using the scripted fallback"
           let fallback = scriptedDecision(state.sim, DefaultBaseline)
+          executed = fallback
+          executed.message = ""
+          executed.notes = ""
+          engineRejected = true
           state.sim.recordFallback(call.seat)
           if fallback.action == "accept":
             state.sim.applyAccept(call.match, "", "", true)
@@ -444,6 +458,24 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
             state.sim.applyOffer(call.match, fallback.take, "", "", true)
         if decision.fallback:
           state.sim.recordFallback(call.seat)
+        if state.trajectory.isSome:
+          var action = %*{"action": executed.action, "message": executed.message,
+            "notes": executed.notes}
+          if executed.action == "offer":
+            var take = newJObject()
+            for index in 0 ..< Items:
+              take[ItemNames[index]] = %executed.take[index]
+            action["take"] = take
+          let origin =
+            if engineRejected or executed.fallback: aoFallback
+            elif executed.nativeAttempts.len > 0: aoModel
+            elif seatExternal: aoUnknown
+            else: aoTeacher
+          state.trajectory.get().recordExecutedDecision($simCopy.events.len, $call.seat,
+            config.players[call.seat].name, %*{"view": decisionObservation(simCopy, call.seat), "operator_prompt": seatPrompt,
+              "control": (if seatExternal: "external" else: "internal")},
+            action, decision.nativeAttempts, origin, systemPrompt(simCopy, call.seat),
+            userPrompt(simCopy, call.seat, seatPrompt), state.sim.done)
         settledAfter = state.sim.matchesSettled
         state.broadcastLocked()
 
@@ -580,7 +612,10 @@ proc websocketHandler(
           withLock stateLock:
             if state.external[slot] and state.awaitingSeat == slot and
                 state.awaitingEvent == payload["event"].getInt():
-              let decision = parseAction(state.sim, payload["action"])
+              var decision = parseAction(state.sim, payload["action"])
+              if payload.hasKey("attempts"):
+                for attempt in payload["attempts"]:
+                  decision.nativeAttempts.add(readAttemptEvidence(attempt))
               var probe = state.sim
               if decision.action == "accept":
                 probe.applyAccept(state.sim.match, decision.message,
@@ -681,6 +716,10 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
     raise newException(NegotiationError, "tokens and players must align")
   state.config = config
   state.sim = initSim(config)
+  if getEnv("COGAME_SAVE_TRAJECTORY_URI").len > 0:
+    state.trajectory = some(newDecisionTrajectory(getEnv("COWORLD_EPISODE_ID"),
+      $config.seed, "negotiation", getEnv("COWORLD_GAME_VERSION"),
+      getEnv("COWORLD_SOURCE_REVISION")))
   state.prompts = newSeq[string](config.players.len)
   state.scripted = newSeq[string](config.players.len)
   state.external = newSeq[bool](config.players.len)
