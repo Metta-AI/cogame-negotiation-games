@@ -16,7 +16,8 @@
 ## `haggler` or `hardliner` plays one deliberately, LLM or not.
 
 import
-  std/[json, math, os, random, strutils],
+  std/[json, math, options, os, random, strutils],
+  bitworld/decision_trajectory,
   bitworld/runtime,
   curly,
   sim
@@ -36,6 +37,7 @@ const
 
 type
   Decision* = object
+    nativeAttempts*: seq[DecisionAttempt]
     action*: string              ## "offer" | "accept"
     take*: array[Items, int]     ## offer: how many of each item the actor takes
     message*: string             ## cheap talk, <= MaxMessageLen runes
@@ -413,9 +415,10 @@ proc extractJsonObject*(text: string): JsonNode =
     raise newException(NegotiationError, "no JSON object in response: " & head)
   parseJson(text[start .. stop])
 
-proc completeText(client: LlmClient, system, user: string, slot: int): string =
+proc completeText(client: LlmClient, system, user: string, slot: int, evidence: var DecisionAttempt): string =
   var body = %*{
     "max_tokens": client.maxOutputTokens,
+    "temperature": 0,
     "system": system,
     "messages": [{"role": "user", "content": user}]
   }
@@ -442,7 +445,12 @@ proc completeText(client: LlmClient, system, user: string, slot: int): string =
     headers["x-api-key"] = client.apiKey
     headers["anthropic-version"] = AnthropicVersion
     url = AnthropicUrl
+  captureInferenceRequest(evidence, body, system, user)
   let response = client.curl.post(url, headers, $body, client.timeoutSeconds)
+  captureInferenceResponse(evidence, response.body, response.code,
+    response.headers["x-softmax-llm-call-id"], response.headers["x-coworld-checkpoint-sha256"],
+    response.headers["x-coworld-tokenizer-sha256"], response.headers["x-coworld-chat-template-sha256"],
+    client.timeoutSeconds, 2)
   if response.code == 401 or response.code == 403:
     let detail = capRunes(response.body, 400)
     if "Model access is denied" in response.body and
@@ -489,13 +497,17 @@ proc decide*(
     result.fallback = true
     return
   let system = systemPrompt(sim, call.seat)
+  var retained: seq[DecisionAttempt]
   for attempt in 0 .. 1:
+    var evidence = newDecisionAttempt("attempt-" & $attempt, client.model, aoModel)
+    var raw = ""
     try:
       var decision: Decision
       var user = userPrompt(sim, call.seat, prompt)
       if attempt > 0:
         user.add(RetryHint)
-      let payload = extractJsonObject(client.completeText(system, user, call.seat))
+      raw = client.completeText(system, user, call.seat, evidence)
+      let payload = extractJsonObject(raw)
       decision = parseAction(sim, payload)
       ## Reject illegal replies here so the retry carries the hint.
       var probe = sim
@@ -504,8 +516,14 @@ proc decide*(
       else:
         probe.applyOffer(call.match, decision.take, decision.message,
           decision.notes, false)
+      evidence.response = %raw
+      evidence.accepted = true
+      decision.nativeAttempts = retained & @[evidence]
       return decision
     except CatchableError as error:
+      evidence.response = %raw
+      evidence.rejectionReason = some(error.msg)
+      retained.add(evidence)
       echo "negotiation llm: seat ", call.seat, " attempt ", attempt,
         " failed: ", error.msg
       if client.disabled:
@@ -514,3 +532,4 @@ proc decide*(
     " falling back to the ", baseline, " baseline"
   result = scriptedDecision(sim, baseline)
   result.fallback = true
+  result.nativeAttempts = retained
