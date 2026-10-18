@@ -60,3 +60,17 @@ splits. Historical exports remain unchanged; their existence is not training app
 
 These checks measure pipeline correctness. Matched model evaluations and learning experiments
 are still required to measure whether wording diversity improves robustness.
+
+## Private native diagnostics
+
+Set `NEGOTIATION_CAPTURE_DIR` to a new private capture directory. The host records the source
+revision, selection, actual private observations, resolved decisions, applied events, and completion.
+Model evidence records actual request bodies before sending, raw responses, call attribution when
+provided, retry prompt hashes, and parsed replies. Interrupted calls retain their started evidence.
+Credentials are excluded. Files are created exclusively with owner-only access.
+
+These diagnostic traces are not automatically admitted as training candidates. Verify a completed
+native trace with `tools/check_native.nim`; it reconstructs each private observation, applied action,
+and the complete public replay through the production simulator. `tools/test_native_prompts.py`
+exercises real player processes and HTTP fixtures at published game budgets, including retries and
+fallbacks. Existing spectator/replay visibility is preserved; private captures are not published there.

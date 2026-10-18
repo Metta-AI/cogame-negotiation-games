@@ -140,7 +140,7 @@ jobs:
               fi
               echo "::group::nim r ${flags} --path:src ${t}"
               # shellcheck disable=SC2086
-              if ! nim r ${flags} --path:src "${t}"; then
+              if ! nim r --parallelBuild:1 ${flags} --path:src --out:"$RUNNER_TEMP/$(basename "${t}" .nim)-${m}" "${t}"; then
                 echo "::error::FAILED (${m}) ${t}"
                 fail=1
               fi
@@ -148,6 +148,25 @@ jobs:
             done
           done
           exit "${fail}"
+
+      - name: Complete prompt and private candidate workflows
+        run: |
+          set -euo pipefail
+          nim c --parallelBuild:1 -d:release --path:src -o:/tmp/negotiation-bridge tools/train_bridge.nim
+          nim c --parallelBuild:1 -d:release --path:src -o:/tmp/negotiation-export tools/export_posttrain.nim
+          python3 tools/test_prompt_games.py /tmp/negotiation-bridge
+          for variant in standard sprint; do
+            for wording in canonical plain numbered questions reordered; do
+              /tmp/negotiation-export "$RUNNER_TEMP/negotiation-$variant-$wording" 10 1 "$variant" "$wording" 0
+            done
+          done
+      - name: Published native held-out and retry workflow
+        run: |
+          set -euo pipefail
+          nim c --parallelBuild:1 -d:release --path:src -o:/tmp/negotiation-game src/negotiation.nim
+          nim c --parallelBuild:1 -d:release --path:src -o:/tmp/negotiation-player src/negotiation_player.nim
+          nim c --parallelBuild:1 -d:release --path:src -o:/tmp/negotiation-native-check tools/check_native.nim
+          python3 tools/test_native_prompts.py /tmp/negotiation-game /tmp/negotiation-player /tmp/negotiation-native-check "$RUNNER_TEMP/negotiation-native" --variant sprint --wording heldout-briefing --mode retry
 
       # Design note §Tests item 20. Runs this repo's own manifest invariants
       # AND the installed coworld CLI's `_load_template_manifest` /

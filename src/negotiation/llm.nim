@@ -16,10 +16,11 @@
 ## `haggler` or `hardliner` plays one deliberately, LLM or not.
 
 import
-  std/[json, math, os, random, strutils],
+  std/[json, math, os, random, strutils, times],
   bitworld/runtime,
   curly,
   prompts,
+  evidence,
   sim
 
 const
@@ -411,7 +412,8 @@ proc extractJsonObject*(text: string): JsonNode =
     raise newException(NegotiationError, "no JSON object in response: " & head)
   parseJson(text[start .. stop])
 
-proc completeText(client: LlmClient, system, user: string, slot: int): string =
+proc completeText(client: LlmClient, selection: PromptSelection, system, user: string,
+    slot, eventId, attempt: int): string =
   var body = %*{
     "max_tokens": client.maxOutputTokens,
     "system": system,
@@ -440,7 +442,22 @@ proc completeText(client: LlmClient, system, user: string, slot: int): string =
     headers["x-api-key"] = client.apiKey
     headers["anthropic-version"] = AnthropicVersion
     url = AnthropicUrl
+  let capture = getEnv("NEGOTIATION_CAPTURE_DIR")
+  let started = epochTime()
+  if capture.len > 0:
+    appendPrivate(capture / "model.jsonl", %*{"event_type": "request_sent",
+      "event_id": eventId, "attempt": attempt, "seat": slot,
+      "request": body, "prompt_template": selection.promptMetadata(system, user)})
   let response = client.curl.post(url, headers, $body, client.timeoutSeconds)
+  if capture.len > 0:
+    var attribution = newJObject()
+    for (key, value) in response.headers:
+      if key.toLowerAscii() in ["x-softmax-llm-call-id", "x-coworld-checkpoint-sha256"]:
+        attribution[key.toLowerAscii()] = %value
+    appendPrivate(capture / "model.jsonl", %*{"event_type": "response_received",
+      "event_id": eventId, "attempt": attempt, "seat": slot,
+      "status": response.code, "body": response.body,
+      "latency_ms": int((epochTime() - started) * 1000), "attribution": attribution})
   if response.code == 401 or response.code == 403:
     let detail = capRunes(response.body, 400)
     if "Model access is denied" in response.body and
@@ -494,7 +511,7 @@ proc decide*(
       var user = userPrompt(sim, call.seat, prompt)
       if attempt > 0:
         user.add(RetryHint)
-      let payload = extractJsonObject(client.completeText(system, user, call.seat))
+      let payload = extractJsonObject(client.completeText(selection, system, user, call.seat, sim.events.len, attempt))
       decision = parseAction(sim, payload)
       ## Reject illegal replies here so the retry carries the hint.
       var probe = sim
@@ -503,6 +520,12 @@ proc decide*(
       else:
         probe.applyOffer(call.match, decision.take, decision.message,
           decision.notes, false)
+      let capture = getEnv("NEGOTIATION_CAPTURE_DIR")
+      if capture.len > 0:
+        appendPrivate(capture / "model.jsonl", %*{"event_type": "response_parsed",
+          "event_id": sim.events.len, "attempt": attempt, "seat": call.seat,
+          "action": decision.action, "take": decision.take,
+          "message": decision.message, "notes": decision.notes})
       return decision
     except CatchableError as error:
       echo "negotiation llm: seat ", call.seat, " attempt ", attempt,

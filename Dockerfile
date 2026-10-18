@@ -40,10 +40,10 @@ RUN rm -f nim.cfg && \
     else echo "--path:\"$pkg\"" >> nim.cfg; fi; \
   done && \
   echo '--path:"src"' >> nim.cfg && \
-  nim c -d:release -d:useMalloc --opt:speed --stackTrace:on \
+  nim c --parallelBuild:1 -d:release -d:useMalloc --opt:speed --stackTrace:on \
     --nimcache:/tmp/negotiation-nimcache --out:negotiation \
     src/negotiation.nim && \
-  nim c -d:release -d:useMalloc --opt:speed --stackTrace:on \
+  nim c --parallelBuild:1 -d:release -d:useMalloc --opt:speed --stackTrace:on \
     --nimcache:/tmp/negotiation-player-nimcache --out:negotiation-player \
     src/negotiation_player.nim
 
