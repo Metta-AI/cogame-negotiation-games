@@ -29,6 +29,7 @@ import
   mummy,
   mummy/routers,
   llm,
+  prompts,
   sim
 
 const
@@ -121,43 +122,6 @@ proc playerStateJson(gs: GameState, slot: int): JsonNode =
     "reason": gs.sim.reason
   }
 
-proc decisionObservation*(sim: Sim, slot: int): JsonNode =
-  ## The acting seat's private valuation and public bargaining history.
-  ## Opponent values, private notes, and the future schedule stay game-owned.
-  let plan = sim.plan
-  let side = sim.sideOfSeat(slot)
-  var offers = newJArray()
-  for offer in sim.offers:
-    let mine =
-      if offer.side == side: offer.take
-      else: complementOf(plan.pool, offer.take)
-    offers.add(%*{"turn": offer.turn, "side": offer.side,
-      "take": offer.take, "worthToYou": worthOf(plan.values[side], mine),
-      "message": offer.text})
-  var prior = newJArray()
-  for event in sim.events:
-    if event.kind == evMatchEnd:
-      let previousPlan = sim.schedule[event.match]
-      if slot in previousPlan.seats:
-        let previousSide = if previousPlan.seats[0] == slot: 0 else: 1
-        prior.add(%*{"match": event.match, "opponent":
-          sim.names[previousPlan.seats[1 - previousSide]],
-          "outcome": event.outcome, "payoff": event.payoff[previousSide]})
-  var standing = newJNull()
-  if sim.standingSide >= 0 and sim.standingSide != side:
-    let mine = complementOf(plan.pool, sim.standing)
-    standing = %*{"opponentTake": sim.standing,
-      "yourTake": mine, "worthToYou": worthOf(plan.values[side], mine)}
-  %*{"slot": slot, "name": sim.names[slot],
-    "opponent": sim.names[plan.seats[1 - side]],
-    "match": sim.match, "matches": sim.config.matches,
-    "turn": sim.turn, "maxTurns": sim.config.maxTurns,
-    "pool": plan.pool, "yourValues": plan.values[side],
-    "standing": standing, "offers": offers,
-    "opponentMessage": sim.lastMessage[1 - side],
-    "priorMatches": prior, "yourScore": sim.score(slot),
-    "notes": sim.notes[slot], "canAccept": sim.acceptLegal}
-
 proc broadcastLocked(gs: GameState) =
   ## Callers hold stateLock. Spectators get the whole table; players get the
   ## redacted per-seat state.
@@ -182,32 +146,6 @@ proc writeArtifact(uri, data, contentType, methodEnv: string) =
   else:
     writeCogameUri(uri, data, contentType, methodEnv)
 
-proc replayPayload(gs: GameState, results: JsonNode): string =
-  var names = newJArray()
-  for name in gs.sim.names:
-    names.add(%name)
-  var events = newJArray()
-  for event in gs.sim.events:
-    events.add(event.eventToJson())
-  var itemNames = newJArray()
-  for name in ItemNames:
-    itemNames.add(%name)
-  $ %*{
-    "protocol": ReplayProtocol,
-    "names": names,
-    "policyNames": gs.policyNamesJson(),
-    "config": {
-      "seed": gs.config.seed,
-      "matches": gs.config.matches,
-      "maxTurns": gs.config.maxTurns,
-      "sampled": true,
-      "itemNames": itemNames,
-      "schedule": gs.sim.scheduleJson()
-    },
-    "events": events,
-    "results": results
-  }
-
 proc statesFromEvents(config: GameConfig, events: seq[GameEvent]): JsonNode =
   ## One table-state object per event prefix, for scrubbing replays.
   result = newJArray()
@@ -222,7 +160,7 @@ proc finishEpisode(runtimeConfig: RuntimeConfig) =
       return
     state.finished = true
     results = state.sim.resultsJson()
-    replayData = state.replayPayload(results)
+    replayData = $state.sim.replayJson(results)
 
     ## Send final frames to players BEFORE writing artifacts: the hosted
     ## worker tears player pods down as soon as results.json exists, and
@@ -285,6 +223,7 @@ proc decisionText(sim: Sim, decision: Decision): string =
 proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
   {.gcsafe.}:
     let config = state.config
+    let selection = promptSelection(parseJson(runtimeConfig.config))
     let gameStart = epochTime()
     let connectDeadline = gameStart + config.playerConnectTimeoutSeconds
 
@@ -382,6 +321,9 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           state.hasPendingAction = false
           state.playerSockets[call.seat].send($ %*{
             "type": "observation", "event": state.awaitingEvent,
+            "prompt_configuration": selection.selectionMetadata(),
+            "input": {"system": systemPrompt(selection, state.sim, call.seat),
+              "user": userPrompt(state.sim, call.seat, seatPrompt)},
             "observation": state.sim.decisionObservation(call.seat)})
 
       let useScripted = not seatExternal and
@@ -415,7 +357,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
             decision = scriptedDecision(simCopy, DefaultBaseline)
             decision.fallback = true
       else:
-        decision = client.decide(simCopy, call, seatPrompt,
+        decision = client.decide(selection, simCopy, call, seatPrompt,
           scripted = seatScripted, forceScripted = pastDeadline)
 
       var settledBefore = 0

@@ -19,6 +19,7 @@ import
   std/[json, math, os, random, strutils],
   bitworld/runtime,
   curly,
+  prompts,
   sim
 
 const
@@ -212,10 +213,7 @@ proc scriptedDecision*(sim: Sim, baseline: string): Decision =
 
 # ---- Prompt building --------------------------------------------------------
 
-const SystemPromptTemplate = """You are $1, a cog at a three-seat negotiation table. Right now you are bargaining
-one-on-one with $2.
-
-Rules:
+const SystemPromptTemplate = "\n\n" & """Rules:
 - A pool of items sits between you: $3 books, $4 hats, $5 balls. The whole pool is
   worth exactly 10 points to you, and exactly 10 points to your opponent - but the
   per-item values are DIFFERENT and PRIVATE. You know yours. You will never be told
@@ -239,10 +237,10 @@ OUTPUT FORMAT: reply with ONLY one JSON object, nothing else - no analysis, no
 explanation, no markdown fences, no text before or after the object. Your reply
 must begin with the character { and end with }."""
 
-proc systemPrompt*(sim: Sim, seat: int): string =
+proc systemPrompt*(selection: PromptSelection, sim: Sim, seat: int): string =
   let plan = sim.plan
   let side = sim.sideOfSeat(seat)
-  SystemPromptTemplate % [
+  selection.introduction(sim.names[seat], sim.names[plan.seats[1 - side]]) & SystemPromptTemplate % [
     sim.names[seat], sim.names[plan.seats[1 - side]],
     $plan.pool[0], $plan.pool[1], $plan.pool[2],
     $sim.config.maxTurns, $MaxMessageLen
@@ -471,6 +469,7 @@ proc completeText(client: LlmClient, system, user: string, slot: int): string =
 
 proc decide*(
   client: LlmClient,
+  selection: PromptSelection,
   sim: Sim,
   call: Call,
   prompt: string,
@@ -488,7 +487,7 @@ proc decide*(
     result = scriptedDecision(sim, baseline)
     result.fallback = true
     return
-  let system = systemPrompt(sim, call.seat)
+  let system = systemPrompt(selection, sim, call.seat)
   for attempt in 0 .. 1:
     try:
       var decision: Decision
@@ -514,3 +513,10 @@ proc decide*(
     " falling back to the ", baseline, " baseline"
   result = scriptedDecision(sim, baseline)
   result.fallback = true
+
+proc decisionJson*(decision: Decision): JsonNode =
+  result = %*{"action": decision.action, "message": decision.message,
+    "notes": decision.notes}
+  if decision.action == "offer":
+    result["take"] = %*{"books": decision.take[0], "hats": decision.take[1],
+      "balls": decision.take[2]}

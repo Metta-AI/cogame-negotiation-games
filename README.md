@@ -107,3 +107,10 @@ CI (`.github/workflows/ci.yml`) is the only harness that matters: it runs
 every test twice (debug and release), builds the image, plays a real episode
 in raw Docker, and opens the built wasm replay bundle in headless chromium
 against the bytes that episode produced.
+
+## Prompt diversity and training
+
+Game configuration supports five training introductions, two evaluation-only introductions,
+and deterministic episode-level mixed selection with an independent prompt seed. Canonical
+prompt bytes and shared bargaining rules remain fixed. See [TRAINING.md](TRAINING.md) for
+controls, complete language workflows, private provenance, and review-required source exports.

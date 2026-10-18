@@ -800,3 +800,66 @@ proc replayMatch*(config: GameConfig, events: seq[GameEvent]): seq[Sim] =
       ## applied through the same proc the live server calls.
       sim.settle(event.text)
     result.add(sim)
+
+proc decisionObservation*(sim: Sim, slot: int): JsonNode =
+  ## The acting seat's private valuation and public bargaining history.
+  ## Opponent values, private notes, and the future schedule stay game-owned.
+  let plan = sim.plan
+  let side = sim.sideOfSeat(slot)
+  var offers = newJArray()
+  for offer in sim.offers:
+    let mine =
+      if offer.side == side: offer.take
+      else: complementOf(plan.pool, offer.take)
+    offers.add(%*{"turn": offer.turn, "side": offer.side,
+      "take": offer.take, "worthToYou": worthOf(plan.values[side], mine),
+      "message": offer.text})
+  var prior = newJArray()
+  for event in sim.events:
+    if event.kind == evMatchEnd:
+      let previousPlan = sim.schedule[event.match]
+      if slot in previousPlan.seats:
+        let previousSide = if previousPlan.seats[0] == slot: 0 else: 1
+        prior.add(%*{"match": event.match, "opponent":
+          sim.names[previousPlan.seats[1 - previousSide]],
+          "outcome": event.outcome, "payoff": event.payoff[previousSide]})
+  var standing = newJNull()
+  if sim.standingSide >= 0 and sim.standingSide != side:
+    let mine = complementOf(plan.pool, sim.standing)
+    standing = %*{"opponentTake": sim.standing,
+      "yourTake": mine, "worthToYou": worthOf(plan.values[side], mine)}
+  %*{"slot": slot, "name": sim.names[slot],
+    "opponent": sim.names[plan.seats[1 - side]],
+    "match": sim.match, "matches": sim.config.matches,
+    "turn": sim.turn, "maxTurns": sim.config.maxTurns,
+    "pool": plan.pool, "yourValues": plan.values[side],
+    "standing": standing, "offers": offers,
+    "opponentMessage": sim.lastMessage[1 - side],
+    "priorMatches": prior, "yourScore": sim.score(slot),
+    "notes": sim.notes[slot], "canAccept": sim.acceptLegal}
+
+proc replayJson*(sim: Sim, results: JsonNode): JsonNode =
+  var names = newJArray()
+  for name in sim.names:
+    names.add(%name)
+  var events = newJArray()
+  for event in sim.events:
+    events.add(event.eventToJson())
+  var itemNames = newJArray()
+  for name in ItemNames:
+    itemNames.add(%name)
+  %*{
+    "protocol": ReplayProtocol,
+    "names": names,
+    "policyNames": results["names"],
+    "config": {
+      "seed": sim.config.seed,
+      "matches": sim.config.matches,
+      "maxTurns": sim.config.maxTurns,
+      "sampled": true,
+      "itemNames": itemNames,
+      "schedule": sim.scheduleJson()
+    },
+    "events": events,
+    "results": results
+  }

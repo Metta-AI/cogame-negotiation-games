@@ -36,6 +36,24 @@
         "players"
       ],
       "properties": {
+        "promptVariant": {
+          "type": "string",
+          "enum": [
+            "canonical",
+            "plain",
+            "numbered",
+            "questions",
+            "reordered",
+            "heldout-briefing",
+            "heldout-reference",
+            "mixed"
+          ],
+          "default": "canonical"
+        },
+        "promptSeed": {
+          "type": "integer",
+          "minimum": 0
+        },
         "tokens": {
           "description": "One connection token per player slot, indexed by slot.",
           "type": "array",
@@ -236,7 +254,7 @@
     "protocols": {
       "player": {
         "type": "text",
-        "value": "negotiation.player.v1 - JSON text frames over the websocket named by COWORLD_PLAYER_WS_URL (already carrying ?slot=N&token=T). A Negotiation Games policy is a prompt: the player container's only job is to deliver it, and the game server makes every decision by sending that prompt plus the acting seat's view (the pool, its OWN private per-item values, the offer standing against it with the worth to itself precomputed, an explicit ACCEPT IS LEGAL NOW line and the per-item bounds, this match's full offer history, its record this episode and its private notes) to Claude. game->player frames: {\"type\":\"welcome\",\"protocol\":\"negotiation.player.v1\",\"slot\":N,\"name\":str,\"matches\":int,\"maxTurns\":int} on connect; {\"type\":\"state\",\"slot\":N,\"name\":str,\"seat\":{\"score\":float,\"points\":int,\"matches\":int,\"deals\":int},\"match\":int,\"matches\":int,\"matchesPlayed\":int,\"started\":bool,\"done\":bool,\"reason\":str} after every event - REDACTED to the seat's own tallies and the match counter, because the game is hidden-information (the pool, both seats' valuations, the offers, the messages and the notes are not for the player containers) and every decision is server-side, so nothing is lost; player frames never carry policyNames. {\"type\":\"final\",\"done\":true,\"scores\":[...],\"points\":[...],\"deals\":[...],\"names\":[aliases],\"matchesPlayed\":int,\"reason\":str,\"slot\":N} at episode end, after which the player should exit 0. player->game frames: {\"type\":\"prompt\",\"prompt\":str,\"scripted\":str|bool} (prompt max 4000 chars; send after connect and again after welcome; the latest frame applies to all later turns; scripted is \"haggler\", \"hardliner\", or a boolean where true means haggler). The published negotiation-player runnable reads its prompt from PLAYER_PROMPT and its baseline from PLAYER_SCRIPTED, so a new policy is `coworld upload-policy` of the same image with --secret-env PLAYER_PROMPT=\"<your strategy>\"."
+        "value": "negotiation.player.v2 uses JSON text frames over COWORLD_PLAYER_WS_URL, including its authenticated slot and token. Welcome carries protocol, slot, anonymous name, matches, and maxTurns. State frames expose only that seat's tallies and episode progress; policy names and other seats' private information are excluded. Final frames carry scores, points, deals, anonymous names, matchesPlayed, reason, and slot; players then exit. Prompt policies send {\"type\":\"prompt\",\"prompt\":str,\"scripted\":str|bool}; the game makes model calls using the latest operator guidance. PLAYER_PROMPT supplies guidance, and PLAYER_SCRIPTED selects haggler or hardliner. Prompts are capped at 4000 characters. External policies register {\"type\":\"register\",\"control\":\"external\"}. Their turns receive {\"type\":\"observation\",\"event\":int,\"observation\":object,\"prompt_configuration\":{bank,variant,selection,seed},\"input\":{\"system\":str,\"user\":str}}. The observation includes only the acting seat's valuation, public offers, own notes, and prior results. Reply with {\"type\":\"action\",\"event\":int,\"action\":object}, preserving the event ID. The action is either {\"action\":\"offer\",\"take\":{\"books\":int,\"hats\":int,\"balls\":int},\"message\":str,\"notes\":str} or {\"action\":\"accept\",\"message\":str,\"notes\":str}. Counts must fit the pool, and accepting requires a standing opponent offer. Game-owned prompt selection stays fixed for the episode; operator guidance remains separate. The game owns legality, fallback, scoring, and replay."
       },
       "global": {
         "type": "text",
