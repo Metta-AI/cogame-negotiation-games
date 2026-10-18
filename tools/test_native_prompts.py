@@ -30,9 +30,7 @@ class Handler(BaseHTTPRequestHandler):
         request = json.loads(body)
         seat = int(self.headers["X-Coworld-Player-Slot"])
         user = request["messages"][0]["content"]
-        match, turn = map(
-            int, re.search(r"MATCH (\d+) of \d+\. TURN (\d+)", user).groups()
-        )
+        match, turn = map(int, re.findall(r"MATCH (\d+) of \d+\. TURN (\d+)", user)[0])
         key = (match, turn, seat)
         action = {
             "action": "accept" if "ACCEPT IS LEGAL NOW: yes" in user else "offer",
