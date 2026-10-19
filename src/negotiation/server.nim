@@ -30,7 +30,6 @@ import
   mummy/routers,
   llm,
   prompts,
-  evidence,
   sim
 
 const
@@ -147,6 +146,32 @@ proc writeArtifact(uri, data, contentType, methodEnv: string) =
   else:
     writeCogameUri(uri, data, contentType, methodEnv)
 
+proc replayPayload(gs: GameState, results: JsonNode): string =
+  var names = newJArray()
+  for name in gs.sim.names:
+    names.add(%name)
+  var events = newJArray()
+  for event in gs.sim.events:
+    events.add(event.eventToJson())
+  var itemNames = newJArray()
+  for name in ItemNames:
+    itemNames.add(%name)
+  $ %*{
+    "protocol": ReplayProtocol,
+    "names": names,
+    "policyNames": gs.policyNamesJson(),
+    "config": {
+      "seed": gs.config.seed,
+      "matches": gs.config.matches,
+      "maxTurns": gs.config.maxTurns,
+      "sampled": true,
+      "itemNames": itemNames,
+      "schedule": gs.sim.scheduleJson()
+    },
+    "events": events,
+    "results": results
+  }
+
 proc statesFromEvents(config: GameConfig, events: seq[GameEvent]): JsonNode =
   ## One table-state object per event prefix, for scrubbing replays.
   result = newJArray()
@@ -161,7 +186,7 @@ proc finishEpisode(runtimeConfig: RuntimeConfig) =
       return
     state.finished = true
     results = state.sim.resultsJson()
-    replayData = $state.sim.replayJson(results)
+    replayData = state.replayPayload(results)
 
     ## Send final frames to players BEFORE writing artifacts: the hosted
     ## worker tears player pods down as soon as results.json exists, and
@@ -225,17 +250,6 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
   {.gcsafe.}:
     let config = state.config
     let selection = promptSelection(parseJson(runtimeConfig.config))
-    let capture = getEnv("NEGOTIATION_CAPTURE_DIR")
-    if capture.len > 0:
-      writePrivate(capture / "model.jsonl", "")
-      writePrivate(capture / "host.jsonl", $(%*{"event_type": "host_started",
-        "visibility": "private", "source_revision": NegotiationSourceRevision,
-        "source_dirty": NegotiationSourceDirty, "prompt_configuration": selection.selectionMetadata(),
-        "config": {"seed": config.seed, "matches": config.matches,
-          "maxTurns": config.maxTurns, "turnDelayMs": config.turnDelayMs,
-          "episodeTimeoutSeconds": config.episodeTimeoutSeconds,
-          "llmTimeoutSeconds": config.llmTimeoutSeconds},
-        "names": state.sim.names}) & "\n")
     let gameStart = epochTime()
     let connectDeadline = gameStart + config.playerConnectTimeoutSeconds
 
@@ -349,14 +363,6 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           sleep(waitMs)
         lastCallStart = epochTime()
 
-      if capture.len > 0:
-        appendPrivate(capture / "host.jsonl", %*{"event_type": "decision_started",
-          "event_id": simCopy.events.len, "seat": call.seat,
-          "view": simCopy.decisionObservation(call.seat),
-          "prompt_template": selection.promptMetadata(systemPrompt(selection, simCopy, call.seat),
-            userPrompt(simCopy, call.seat, seatPrompt)),
-          "external": seatExternal, "operator_prompt": seatPrompt})
-
       ## The slow part (Claude) runs outside the lock on a snapshot; only
       ## this thread mutates the sim, so the snapshot cannot go stale.
       var decision: Decision
@@ -384,11 +390,6 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       var settledAfter = 0
       withLock stateLock:
         settledBefore = state.sim.matchesSettled
-        if capture.len > 0:
-          appendPrivate(capture / "host.jsonl", %*{"event_type": "decision_resolved",
-            "event_id": simCopy.events.len, "seat": call.seat,
-            "action": decision.decisionJson(), "scripted": decision.scripted,
-            "fallback": decision.fallback})
         echo "negotiation: match ", state.sim.match + 1, " turn ",
           state.sim.turn, " ", decisionText(state.sim, decision),
           (if decision.scripted: " [scripted]" else: ""), " at ",
@@ -411,12 +412,6 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
             state.sim.applyOffer(call.match, fallback.take, "", "", true)
         if decision.fallback:
           state.sim.recordFallback(call.seat)
-        if capture.len > 0:
-          var applied = newJArray()
-          for index in simCopy.events.len ..< state.sim.events.len:
-            applied.add(state.sim.events[index].eventToJson())
-          appendPrivate(capture / "host.jsonl", %*{"event_type": "action_applied",
-            "event_id": simCopy.events.len, "seat": call.seat, "events": applied})
         settledAfter = state.sim.matchesSettled
         state.broadcastLocked()
 
@@ -427,9 +422,6 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
         pacingSpent += config.turnDelayMs
         sleep(config.turnDelayMs)
 
-    if capture.len > 0:
-      appendPrivate(capture / "host.jsonl", %*{"event_type": "host_completed",
-        "results": state.sim.resultsJson()})
     finishEpisode(runtimeConfig)
 
 var gameThread: Thread[RuntimeConfig]

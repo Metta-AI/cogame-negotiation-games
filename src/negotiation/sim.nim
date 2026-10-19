@@ -837,29 +837,3 @@ proc decisionObservation*(sim: Sim, slot: int): JsonNode =
     "opponentMessage": sim.lastMessage[1 - side],
     "priorMatches": prior, "yourScore": sim.score(slot),
     "notes": sim.notes[slot], "canAccept": sim.acceptLegal}
-
-proc replayJson*(sim: Sim, results: JsonNode): JsonNode =
-  var names = newJArray()
-  for name in sim.names:
-    names.add(%name)
-  var events = newJArray()
-  for event in sim.events:
-    events.add(event.eventToJson())
-  var itemNames = newJArray()
-  for name in ItemNames:
-    itemNames.add(%name)
-  %*{
-    "protocol": ReplayProtocol,
-    "names": names,
-    "policyNames": results["names"],
-    "config": {
-      "seed": sim.config.seed,
-      "matches": sim.config.matches,
-      "maxTurns": sim.config.maxTurns,
-      "sampled": true,
-      "itemNames": itemNames,
-      "schedule": sim.scheduleJson()
-    },
-    "events": events,
-    "results": results
-  }

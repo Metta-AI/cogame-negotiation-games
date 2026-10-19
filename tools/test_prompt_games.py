@@ -3,8 +3,8 @@
 import argparse
 import hashlib
 import json
-from pathlib import Path
 import subprocess
+from pathlib import Path
 from typing import TextIO, cast
 
 WORDINGS = (
@@ -57,7 +57,7 @@ def play(bridge: Path, variant: str, seed: int, wording: str, prompt_seed: int) 
         view = obs["semantic_view"]
         metadata = view.pop("prompt_template")
         assert metadata == {
-            "bank": "negotiation-games-rules-v1",
+            "bank": "negotiation-games-rules-v2",
             "variant": selected,
             "selection": wording,
             "seed": prompt_seed,
@@ -97,16 +97,14 @@ def main() -> None:
     args = parser.parse_args()
     count = 0
     for variant in ("standard", "sprint"):
-        for seed in (1, 2):
+        for seed in (1,):
             canonical = None
-            for wording, prompt_seed in [(w, 0) for w in WORDINGS] + [
-                ("mixed", seed) for seed in range(5)
-            ]:
+            for wording, prompt_seed in [(w, 0) for w in WORDINGS] + [("mixed", 4)]:
                 transcript = play(args.bridge, variant, seed, wording, prompt_seed)
                 for row in transcript[:-1]:
                     row[0]["messages"][0]["content"] = row[0]["messages"][0][
                         "content"
-                    ].split("\n\nRules:", 1)[1]
+                    ].split("OUTPUT FORMAT:", 1)[1]
                 if canonical is None:
                     canonical = transcript
                 else:

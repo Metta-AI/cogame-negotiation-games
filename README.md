@@ -110,7 +110,7 @@ against the bytes that episode produced.
 
 ## Prompt diversity and training
 
-Game configuration supports five training introductions, two evaluation-only introductions,
+Game configuration supports five training presentations, two evaluation-only presentations,
 and deterministic episode-level mixed selection with an independent prompt seed. Canonical
 prompt bytes and shared bargaining rules remain fixed. See [TRAINING.md](TRAINING.md) for
-controls, complete language workflows, private provenance, and review-required source exports.
+controls, complete language workflows, private provenance, and reviewed train/validation exports.

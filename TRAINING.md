@@ -1,76 +1,42 @@
 # Negotiation Games training
 
-Both published variants use the production bargaining simulator and hosted text parser.
-Episode prompt selection changes only the introduction. Shared rules, private observations,
-canonical prompt bytes, action semantics, and sampled game budgets remain fixed.
+The `negotiation-games-rules-v2` bank provides five training presentations and two
+evaluation-only presentations. Complete explanations of private values, offers,
+acceptance, turn limits, payoffs, cheap talk, and private notes vary in wording and
+order. Canonical messages, sampled game budgets, and action syntax stay fixed.
 
-## Episode wording
-
-Game configuration and bridge resets accept `promptVariant`: `canonical` (default), `plain`,
-`numbered`, `questions`, `reordered`, `heldout-briefing`, `heldout-reference`, or `mixed`.
-Mixed selection requires a nonnegative `promptSeed`; its remainder modulo five selects a
-training introduction. Selection stays fixed for the episode and does not advance simulation
-randomness. The two held-out introductions are evaluation-only.
-
-External observations carry `prompt_configuration` and the actual rendered `input.system`
-and `input.user`. Native prompt policies receive the same selected renderer. Private source
-and bridge metadata records the selected bank and exact system/user SHA-256 hashes.
+Set `promptVariant` and `promptSeed` in game configuration or bridge resets.
+`mixed` requires a nonnegative explicit seed and selects one presentation for the
+episode without consuming game randomness. Native prompt calls and external player
+observations use the same renderer. Metadata records selection and exact message hashes.
 
 ## Complete language games
 
-```bash
-nim c --parallelBuild:1 --path:src -o:negotiation-train-bridge tools/train_bridge.nim
-python tools/test_prompt_games.py ./negotiation-train-bridge
-./negotiation-train-bridge coworld_manifest_template.json standard
+```sh
+negotiation-train-bridge coworld_manifest_template.json standard
+python3 tools/test_prompt_games.py BRIDGE
 ```
 
-The bridge reads one JSON object per line. Reset with
-`{"kind":"reset","players":3,"seed":1,"promptVariant":"mixed","promptSeed":2}`.
-Each decision exposes only the acting seat's valuation, public bargaining history, and its
-own notes. Reply through `step` with the decision ID and a JSON response string. `teacher`
-returns a published scripted policy's response. Offer counts, acceptance, public messages,
-and private notes pass through the hosted parser and simulator. This bridge is text-only;
-it does not supply a numeric codec for conditional offers.
+The bridge uses the production parser and simulator. Acting seats receive only their
+own private valuation, public bargaining history, and private notes. `reset` accepts
+three players, a scenario seed, and prompt selection. `teacher` returns the scripted
+action; `step` accepts the decision ID and JSON reply. Notes persist privately, and
+messages reach the opponent. Held-out wording is rejected for training resets.
 
-Reset requests with `split: train` reject held-out wording. Teacher calls support deterministic
-pipeline checks; they do not establish language-model quality.
+## Teacher exports
 
-## Review-required source candidates
-
-```bash
-nim c --parallelBuild:1 --path:src -o:negotiation-export tools/export_posttrain.nim
-nim c --parallelBuild:1 --path:src -o:negotiation-check tools/check_episode.nim
-./negotiation-export /tmp/negotiation-standard 10 1 standard mixed 2
+```sh
+export_posttrain PRIVATE_OUTPUT 10 1 standard mixed 0
+export_posttrain PRIVATE_OUTPUT 10 1 sprint mixed 0
 ```
 
-Commit the source before exporting. The exporter requires at least ten complete games and
-rejects held-out wording or an existing destination. It preserves the published variant's
-sampled configuration and plays the haggler and hardliner policies through the real parser.
+The original train/validation JSONL and manifest are retained. Every fifth scenario
+is validation; scenario families use `negotiation-SEED` across both variants. Mixed
+exports cycle separately within each split so all five presentations reach training.
+Each reply passes through the hosted parser and native simulator using the ordinary
+sampled manifest budget. Existing output directories are refused. Run from clean
+committed source so revision pins identify the exported code.
 
-Outputs are owner-only private canonical trajectories, per-game replays, and a manifest
-marked `review_required`. Every candidate is reconstructed through the production simulator:
-private observations, rendered prompts, parsed responses, applied actions, all replay events,
-and final outcomes must agree. Recheck retained evidence with
-`./negotiation-check <episode.jsonl> <episode.replay.json>`.
-
-There are no automatic training or validation projections. The shared Metta importer owns
-scenario-family splitting and requires independent review before training admission. Families
-use the scenario seed across wording and game variants, preventing replicas from crossing
-splits. Historical exports remain unchanged; their existence is not training approval.
-
-These checks measure pipeline correctness. Matched model evaluations and learning experiments
-are still required to measure whether wording diversity improves robustness.
-
-## Private native diagnostics
-
-Set `NEGOTIATION_CAPTURE_DIR` to a new private capture directory. The host records the source
-revision, selection, actual private observations, resolved decisions, applied events, and completion.
-Model evidence records actual request bodies before sending, raw responses, call attribution when
-provided, retry prompt hashes, and parsed replies. Interrupted calls retain their started evidence.
-Credentials are excluded. Files are created exclusively with owner-only access.
-
-These diagnostic traces are not automatically admitted as training candidates. Verify a completed
-native trace with `tools/check_native.nim`; it reconstructs each private observation, applied action,
-and the complete public replay through the production simulator. `tools/test_native_prompts.py`
-exercises real player processes and HTTP fixtures at published game budgets, including retries and
-fallbacks. Existing spectator/replay visibility is preserved; private captures are not published there.
+Corpora require content review before training. Scripted parity checks do not measure
+model quality or establish resistance to training collapse. Numeric training still
+requires a separate conditional action codec for offer/accept and item quantities.

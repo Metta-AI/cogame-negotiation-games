@@ -16,12 +16,10 @@
 ## `haggler` or `hardliner` plays one deliberately, LLM or not.
 
 import
-  std/[json, math, os, random, strutils, times],
+  std/[json, math, os, random, strutils],
   bitworld/runtime,
   curly,
-  prompts,
-  evidence,
-  sim
+  sim, prompts
 
 const
   AnthropicUrl = "https://api.anthropic.com/v1/messages"
@@ -214,7 +212,10 @@ proc scriptedDecision*(sim: Sim, baseline: string): Decision =
 
 # ---- Prompt building --------------------------------------------------------
 
-const SystemPromptTemplate = "\n\n" & """Rules:
+const SystemPromptTemplate = """You are $1, a cog at a three-seat negotiation table. Right now you are bargaining
+one-on-one with $2.
+
+Rules:
 - A pool of items sits between you: $3 books, $4 hats, $5 balls. The whole pool is
   worth exactly 10 points to you, and exactly 10 points to your opponent - but the
   per-item values are DIFFERENT and PRIVATE. You know yours. You will never be told
@@ -241,11 +242,36 @@ must begin with the character { and end with }."""
 proc systemPrompt*(selection: PromptSelection, sim: Sim, seat: int): string =
   let plan = sim.plan
   let side = sim.sideOfSeat(seat)
-  selection.introduction(sim.names[seat], sim.names[plan.seats[1 - side]]) & SystemPromptTemplate % [
-    sim.names[seat], sim.names[plan.seats[1 - side]],
-    $plan.pool[0], $plan.pool[1], $plan.pool[2],
-    $sim.config.maxTurns, $MaxMessageLen
-  ]
+  let values = [sim.names[seat], sim.names[plan.seats[1 - side]],
+    $plan.pool[0], $plan.pool[1], $plan.pool[2], $sim.config.maxTurns, $MaxMessageLen]
+  if selection.selectedVariant == pvCanonical:
+    return SystemPromptTemplate % values
+  let identity = "You are $1 at a three-seat negotiation table, currently bargaining one-on-one with $2."
+  let pool = "The available pool contains $3 books, $4 hats, and $5 balls. Its total value " &
+    "is exactly ten points to each side, but per-item values differ and are private. " &
+    "You know only your values; neither side is told the other's values."
+  let turns = "Alternate turns. OFFER the exact quantity of each item you will take, " &
+    "leaving the rest to your opponent, or ACCEPT the offer currently standing " &
+    "against you. The combined turn limit is $6. If no offer is accepted by then, " &
+    "both sides receive zero for the match."
+  let score = "Your match payoff is your own valuation of your final items, out of ten. " &
+    "No deal pays zero. Waiting has no cost beyond using a turn, and used turns " &
+    "cannot be recovered."
+  let communication = "You may send up to $7 characters with an action. Your opponent " &
+    "reads the message, but its claims are not enforced. Only the structured OFFER " &
+    "is binding and graded. Notes are private to you, returned on your next turn, " &
+    "and never shown to your opponent."
+  let briefing = case selection.selectedVariant
+    of pvPlain: identity & "\n\n" & pool & "\n\n" & turns & "\n\n" & score & "\n\n" & communication
+    of pvNumbered: "1. Assignment\n" & identity & "\n2. Items and values\n" & pool & "\n3. Turns and agreement\n" & turns & "\n4. Payoff\n" & score & "\n5. Messages and notes\n" & communication
+    of pvQuestions: "Who am I bargaining with?\n" & identity & "\nHow am I paid?\n" & score & "\nWhat can I divide?\n" & pool & "\nHow do we reach a deal?\n" & turns & "\nWhat can we communicate?\n" & communication
+    of pvReordered: "PAYOFF\n" & score & "\nDEADLINE AND ACTIONS\n" & turns & "\nPRIVATE VALUES\n" & pool & "\nCOMMUNICATION\n" & communication & "\nTABLE\n" & identity
+    of pvHeldoutBriefing: "Read the assignment.\n" & identity & "\nAccount for information.\n" & pool & "\nPlan the agreement.\n" & turns & "\nEvaluate its value.\n" & score & "\nUse messages appropriately.\n" & communication
+    of pvHeldoutReference: "Turn reference: " & turns & "\nValue reference: " & pool & "\nCommunication reference: " & communication & "\nPayoff reference: " & score & "\nIdentity reference: " & identity
+    of pvCanonical, pvMixed: raise newException(ValueError, "alternate wording must resolve")
+  (briefing & "\n\n" & """OUTPUT FORMAT: reply with ONLY one JSON object, nothing else - no analysis, no
+explanation, no markdown fences, no text before or after the object. Your reply
+must begin with the character { and end with }.""") % values
 
 proc historyText(sim: Sim, side: int): string =
   ## Every offer of THIS match, both sides, each with its worth to this seat.
@@ -412,8 +438,7 @@ proc extractJsonObject*(text: string): JsonNode =
     raise newException(NegotiationError, "no JSON object in response: " & head)
   parseJson(text[start .. stop])
 
-proc completeText(client: LlmClient, selection: PromptSelection, system, user: string,
-    slot, eventId, attempt: int): string =
+proc completeText(client: LlmClient, system, user: string, slot: int): string =
   var body = %*{
     "max_tokens": client.maxOutputTokens,
     "system": system,
@@ -442,22 +467,7 @@ proc completeText(client: LlmClient, selection: PromptSelection, system, user: s
     headers["x-api-key"] = client.apiKey
     headers["anthropic-version"] = AnthropicVersion
     url = AnthropicUrl
-  let capture = getEnv("NEGOTIATION_CAPTURE_DIR")
-  let started = epochTime()
-  if capture.len > 0:
-    appendPrivate(capture / "model.jsonl", %*{"event_type": "request_sent",
-      "event_id": eventId, "attempt": attempt, "seat": slot,
-      "request": body, "prompt_template": selection.promptMetadata(system, user)})
   let response = client.curl.post(url, headers, $body, client.timeoutSeconds)
-  if capture.len > 0:
-    var attribution = newJObject()
-    for (key, value) in response.headers:
-      if key.toLowerAscii() in ["x-softmax-llm-call-id", "x-coworld-checkpoint-sha256"]:
-        attribution[key.toLowerAscii()] = %value
-    appendPrivate(capture / "model.jsonl", %*{"event_type": "response_received",
-      "event_id": eventId, "attempt": attempt, "seat": slot,
-      "status": response.code, "body": response.body,
-      "latency_ms": int((epochTime() - started) * 1000), "attribution": attribution})
   if response.code == 401 or response.code == 403:
     let detail = capRunes(response.body, 400)
     if "Model access is denied" in response.body and
@@ -511,7 +521,7 @@ proc decide*(
       var user = userPrompt(sim, call.seat, prompt)
       if attempt > 0:
         user.add(RetryHint)
-      let payload = extractJsonObject(client.completeText(selection, system, user, call.seat, sim.events.len, attempt))
+      let payload = extractJsonObject(client.completeText(system, user, call.seat))
       decision = parseAction(sim, payload)
       ## Reject illegal replies here so the retry carries the hint.
       var probe = sim
@@ -520,12 +530,6 @@ proc decide*(
       else:
         probe.applyOffer(call.match, decision.take, decision.message,
           decision.notes, false)
-      let capture = getEnv("NEGOTIATION_CAPTURE_DIR")
-      if capture.len > 0:
-        appendPrivate(capture / "model.jsonl", %*{"event_type": "response_parsed",
-          "event_id": sim.events.len, "attempt": attempt, "seat": call.seat,
-          "action": decision.action, "take": decision.take,
-          "message": decision.message, "notes": decision.notes})
       return decision
     except CatchableError as error:
       echo "negotiation llm: seat ", call.seat, " attempt ", attempt,

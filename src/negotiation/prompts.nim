@@ -17,7 +17,7 @@ type
     seed*: int
 
 const
-  PromptBankVersion* = "negotiation-games-rules-v1"
+  PromptBankVersion* = "negotiation-games-rules-v2"
 
 proc promptSelection*(node: JsonNode): PromptSelection =
   if node.kind != JObject:
@@ -47,15 +47,3 @@ proc promptMetadata*(selection: PromptSelection, system, user: string): JsonNode
 proc selectionMetadata*(selection: PromptSelection): JsonNode =
   %*{"bank": PromptBankVersion, "variant": $selection.selectedVariant,
     "selection": $selection.variant, "seed": selection.seed}
-
-proc introduction*(selection: PromptSelection, alias, opponent: string): string =
-  result = case selection.selectedVariant
-    of pvCanonical: "You are <ALIAS>, a cog at a three-seat negotiation table. Right now you are bargaining\none-on-one with <OPPONENT>."
-    of pvPlain: "At this three-seat negotiation table, you play the cog <ALIAS>.\nYour current one-on-one bargaining partner is <OPPONENT>."
-    of pvNumbered: "1. This negotiation table has three seats.\n2. You are the cog <ALIAS>.\n3. You are currently bargaining one-on-one with <OPPONENT>."
-    of pvQuestions: "How many seats are at this negotiation table? Three.\nWho are you? The cog <ALIAS>. Who is your current one-on-one bargaining partner? <OPPONENT>."
-    of pvReordered: "Your current one-on-one bargaining partner is <OPPONENT>.\nYou are <ALIAS>, a cog at a negotiation table with three seats."
-    of pvHeldoutBriefing: "Negotiation briefing: three seats share this table. You are the cog <ALIAS>,\ncurrently bargaining one-on-one with <OPPONENT>."
-    of pvHeldoutReference: "Table: three-seat negotiation. Your cog: <ALIAS>.\nCurrent bargaining format: one-on-one. Current opponent: <OPPONENT>."
-    of pvMixed: raise newException(Defect, "unresolved mixed wording")
-  result = result.replace("<ALIAS>", alias).replace("<OPPONENT>", opponent)
