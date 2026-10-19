@@ -137,6 +137,7 @@ def main() -> None:
                 }
             )
             + "\n",
+            check=False,
             capture_output=True,
             text=True,
         )
