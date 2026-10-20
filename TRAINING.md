@@ -46,4 +46,4 @@ split. Omitted, training, and unrecognized splits reject them.
 
 Version three independently phrases the numbered, question-led, reordered, and
 held-out rules. Canonical/plain text and response syntax remain unchanged. Export
-episode IDs include selected wording and prompt seed; gameplay seed families stay fixed.
+episode IDs include requested selection, resolved wording, and prompt seed; gameplay seed families stay fixed.

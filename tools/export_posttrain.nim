@@ -66,7 +66,7 @@ when isMainModule:
           parsed.notes == teacher.notes
         rows.add($(%*{
           "episode_id": "negotiation-" & variant & "-" & $seed & "-" &
-            $selection.selectedVariant & "-" & $selection.seed,
+            $selection.variant & "-" & $selection.selectedVariant & "-" & $selection.seed,
           "seed": "negotiation-" & $seed,
           "prompt_template": selection.promptMetadata(systemPrompt(selection, sim, call.seat), userPrompt(sim, call.seat, OperatorPrompt)),
           "decision_id": rows.len,
