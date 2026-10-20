@@ -1,3 +1,4 @@
+import negotiation/prompts
 ## Sim unit tests — design note §Tests items 1-13.
 ##
 ## The rules module is shared by the server, these tests and the wasm replay
@@ -488,7 +489,7 @@ suite "13. two name spaces":
       of ckMatch:
         sim.beginMatch()
       of ckAct:
-        let system = systemPrompt(sim, call.seat)
+        let system = systemPrompt(PromptSelection(), sim, call.seat)
         let user = userPrompt(sim, call.seat, "concede the cheap item first")
         for name in names:
           check name notin system

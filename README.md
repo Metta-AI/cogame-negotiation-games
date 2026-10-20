@@ -109,6 +109,7 @@ in raw Docker, and opens the built wasm replay bundle in headless chromium
 against the bytes that episode produced.
 
 
+
 ## Private training evidence
 
 Set `COGAME_SAVE_TRAJECTORY_URI` alongside `COWORLD_EPISODE_ID`,
@@ -119,7 +120,9 @@ artifact separate from public replay; local trajectory files use mode 0600.
 
 `tools/export_native_posttrain.py --replay replay.json --trajectory trajectory.jsonl
 --game-log game.log --episode-id EPISODE_ID` verifies decisions against this
-source revision's seeded engine, prompts, parser, and terminal scores. It emits
+source revision's seeded engine, selected prompts, parser, and terminal scores.
+Use each historical capture's original source revision and reader; current
+captures also retain their episode-level wording configuration. It emits
 a `coworld.native-verification.v1` report with file hashes. Use the pinned
 `nimby.lock` and Nim on PATH. The caller must independently join provider call
 IDs and review selected responses before using them as supervised labels.
@@ -133,3 +136,11 @@ independent provider archives through real HTTP/WebSocket game processes.
 Synthetic fixture responses are infrastructure checks, not model quality or
 approved training data. Publish and qualify a matching image before collecting
 hosted data from the new source.
+
+
+## Prompt diversity and training
+
+Game configuration supports five training presentations, two evaluation-only presentations,
+and deterministic episode-level mixed selection with an independent prompt seed. Canonical
+prompt bytes and shared bargaining rules remain fixed. See [TRAINING.md](TRAINING.md) for
+controls, complete language workflows, private provenance, and reviewed train/validation exports.

@@ -140,7 +140,7 @@ jobs:
               fi
               echo "::group::nim r ${flags} --path:src ${t}"
               # shellcheck disable=SC2086
-              if ! nim r ${flags} --path:src "${t}"; then
+              if ! nim r --parallelBuild:1 ${flags} --path:src --out:"$RUNNER_TEMP/$(basename "${t}" .nim)-${m}" "${t}"; then
                 echo "::error::FAILED (${m}) ${t}"
                 fail=1
               fi
@@ -148,6 +148,11 @@ jobs:
             done
           done
           exit "${fail}"
+
+      - name: Complete prompt games
+        run: |
+          nim c --parallelBuild:1 -d:release --path:src -o:/tmp/negotiation-bridge tools/train_bridge.nim
+          python3 tools/test_prompt_games.py /tmp/negotiation-bridge
 
       # Design note §Tests item 20. Runs this repo's own manifest invariants
       # AND the installed coworld CLI's `_load_template_manifest` /

@@ -1,31 +1,49 @@
 # Negotiation Games training
 
-Both certified variants have a local simulator and hosted text players. Export
-complete episodes for Metta post-training with the hosted prompt and reply
-parser:
+The `negotiation-games-rules-v3` bank provides five training presentations and two
+evaluation-only presentations. Complete explanations of private values, offers,
+acceptance, turn limits, payoffs, cheap talk, and private notes vary in wording and
+order. Canonical messages, sampled game budgets, and action syntax stay fixed.
 
-```bash
-nimby sync nimby.lock
-nim r --path:src tools/export_posttrain.nim /tmp/negotiation-standard 10 1 standard
-nim r --path:src tools/export_posttrain.nim /tmp/negotiation-sprint 10 1 sprint
+Set `promptVariant` and `promptSeed` in game configuration or bridge resets.
+`mixed` requires a nonnegative explicit seed and selects one presentation for the
+episode without consuming game randomness. Native prompt calls and external player
+observations use the same renderer. Metadata records selection and exact message hashes.
+
+## Complete language games
+
+```sh
+negotiation-train-bridge coworld_manifest_template.json standard
+python3 tools/test_prompt_games.py BRIDGE
 ```
 
-The exporter reads each certified `game_config` from
-`coworld_manifest_template.json`, applies the same episode budget sampling as
-the server, and plays seeded matches with the published haggler and hardliner
-policies. It writes `train.jsonl`, `validation.jsonl`, and `manifest.json`.
-Seeds divisible by five go to validation, keeping each episode in one split.
-Every offer or accept passes the hosted parser and native simulator. The
-exporter refuses an existing output directory.
+The bridge uses the production parser and simulator. Acting seats receive only their
+own private valuation, public bargaining history, and private notes. `reset` accepts
+three players, a scenario seed, and prompt selection. `teacher` returns the scripted
+action; `step` accepts the decision ID and JSON reply. Notes persist privately, and
+messages reach the opponent. Held-out wording is rejected for training resets.
 
-Train the text policy with Metta's post-training CLI:
+## Teacher exports
 
-```bash
-uv run python -m metta_posttrain.train --dataset /tmp/negotiation-standard \
-  --output /tmp/negotiation-model --model Qwen/Qwen2.5-0.5B-Instruct \
-  --max-steps 100 --max-length 4096
+```sh
+export_posttrain PRIVATE_OUTPUT 10 1 standard mixed 0
+export_posttrain PRIVATE_OUTPUT 10 1 sprint mixed 0
 ```
 
-The dataset imitates scripted play; its loss does not measure policy quality.
-Negotiation's offer or accept action includes three bounded item counts, so
-numeric Metta RL and PufferLib training need a conditional action codec.
+The original train/validation JSONL and manifest are retained. Every fifth scenario
+is validation; scenario families use `negotiation-SEED` across both variants. Mixed
+exports cycle separately within each split so all five presentations reach training.
+Each reply passes through the hosted parser and native simulator using the ordinary
+sampled manifest budget. Existing output directories are refused. Run from clean
+committed source so revision pins identify the exported code.
+
+Corpora require content review before training. Scripted parity checks do not measure
+model quality or establish resistance to training collapse. Numeric training still
+requires a separate conditional action codec for offer/accept and item quantities.
+
+Held-out bridge wordings require an explicit `evaluation`, `validation`, or `test`
+split. Omitted, training, and unrecognized splits reject them.
+
+Version three independently phrases the numbered, question-led, reordered, and
+held-out rules. Canonical/plain text and response syntax remain unchanged. Export
+episode IDs include requested selection, resolved wording, and prompt seed; gameplay seed families stay fixed.

@@ -1,6 +1,6 @@
 ## Verify native captures against the source-owned seeded replay engine.
 import std/[json, os, strutils]
-import negotiation/[sim, llm, server]
+import negotiation/[sim, llm, server, prompts]
 
 let args = commandLineParams()
 if args.len != 3: quit("usage: verify_native REPLAY TRAJECTORY EPISODE_ID", 1)
@@ -20,6 +20,7 @@ let fullSchedule = frames[^1].done and frames[^1].reason == "complete"
 doAssert frames[^1].resultsJson()["scores"] == replay["results"]["scores"]
 doAssert (summary["status"].getStr() == "completed") == fullSchedule
 var index = 0
+var episodeSelection: JsonNode
 for eventIndex, event in events:
   if event.kind in {evOffer, evAccept}:
     let seat = event.seat
@@ -38,12 +39,19 @@ for eventIndex, event in events:
     doAssert capture["executed_action"] == action
     doAssert capture["observation"]["view"] == decisionObservation(frames[eventIndex], seat)
     let operatorPrompt = capture["observation"]["operator_prompt"].getStr()
-    let system = systemPrompt(frames[eventIndex], seat)
+    let configuration = capture["observation"]["prompt_configuration"]
+    if index == 0: episodeSelection = configuration
+    doAssert configuration == episodeSelection
+    let system = systemPrompt(promptSelection(configuration), frames[eventIndex], seat)
     let user = userPrompt(frames[eventIndex], seat, operatorPrompt)
+    var modelAttempt = 0
     for attempt in capture["attempts"]:
       if attempt["origin"].getStr() == "model":
         doAssert attempt["prompt"][0]["content"].getStr() == system
-        doAssert attempt["prompt"][1]["content"].getStr().startsWith(user)
+        doAssert modelAttempt < 2
+        let expectedUser = user & (if modelAttempt == 1: RetryHint else: "")
+        doAssert attempt["prompt"][1]["content"].getStr() == expectedUser
+        inc modelAttempt
         doAssert attempt["request"]["system"].getStr() == system
         doAssert attempt["request"]["messages"][0]["content"] == attempt["prompt"][1]["content"]
       if attempt["attempt_id"] == capture["selected_attempt_id"] and attempt["origin"].getStr() in ["model", "teacher"]:
