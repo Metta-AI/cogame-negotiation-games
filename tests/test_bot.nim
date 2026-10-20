@@ -1,3 +1,4 @@
+import negotiation/prompts
 ## Scripted-baseline and reply-parsing tests — design note §Tests items
 ## 14-19.
 ##
@@ -206,7 +207,7 @@ suite "17. no credentials, no network":
     sim.beginMatch()
     let call = sim.currentCall()
     let started = getMonoTime()
-    let decision = client.decide(sim, call, "bargain hard", scripted = "")
+    let decision = client.decide(PromptSelection(), sim, call, "bargain hard", scripted = "")
     let elapsed = (getMonoTime() - started).inMilliseconds
     check elapsed < 1000
     check decision.scripted
@@ -216,12 +217,12 @@ suite "17. no credentials, no network":
     check decision.action == baseline.action
     check decision.take == baseline.take
     ## A seat that REGISTERED a baseline is playing its policy, not degrading.
-    let registered = client.decide(sim, call, "", scripted = "hardliner")
+    let registered = client.decide(PromptSelection(), sim, call, "", scripted = "hardliner")
     check registered.scripted
     check not registered.fallback
     check registered.action == scriptedDecision(sim, "hardliner").action
     ## Past the deadline every remaining turn is scripted, instantly.
-    let forced = client.decide(sim, call, "bargain hard", scripted = "",
+    let forced = client.decide(PromptSelection(), sim, call, "bargain hard", scripted = "",
       forceScripted = true)
     check forced.scripted
     check forced.fallback

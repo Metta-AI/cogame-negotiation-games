@@ -19,7 +19,7 @@ import
   std/[json, math, os, random, strutils],
   bitworld/runtime,
   curly,
-  sim
+  sim, prompts
 
 const
   AnthropicUrl = "https://api.anthropic.com/v1/messages"
@@ -239,14 +239,68 @@ OUTPUT FORMAT: reply with ONLY one JSON object, nothing else - no analysis, no
 explanation, no markdown fences, no text before or after the object. Your reply
 must begin with the character { and end with }."""
 
-proc systemPrompt*(sim: Sim, seat: int): string =
+proc systemPrompt*(selection: PromptSelection, sim: Sim, seat: int): string =
   let plan = sim.plan
   let side = sim.sideOfSeat(seat)
-  SystemPromptTemplate % [
-    sim.names[seat], sim.names[plan.seats[1 - side]],
-    $plan.pool[0], $plan.pool[1], $plan.pool[2],
-    $sim.config.maxTurns, $MaxMessageLen
-  ]
+  let values = [sim.names[seat], sim.names[plan.seats[1 - side]],
+    $plan.pool[0], $plan.pool[1], $plan.pool[2], $sim.config.maxTurns, $MaxMessageLen]
+  if selection.selectedVariant == pvCanonical:
+    return SystemPromptTemplate % values
+  let identity = "You are $1 at a three-seat negotiation table, currently bargaining one-on-one with $2."
+  let pool = "The available pool contains $3 books, $4 hats, and $5 balls. Its total value " &
+    "is exactly ten points to each side, but per-item values differ and are private. " &
+    "You know only your values; neither side is told the other's values."
+  let turns = "Alternate turns. OFFER the exact quantity of each item you will take, " &
+    "leaving the rest to your opponent, or ACCEPT the offer currently standing " &
+    "against you. The combined turn limit is $6. If no offer is accepted by then, " &
+    "both sides receive zero for the match."
+  let score = "Your match payoff is your own valuation of your final items, out of ten. " &
+    "No deal pays zero. Waiting has no cost beyond using a turn, and used turns " &
+    "cannot be recovered."
+  let communication = "You may send up to $7 characters with an action. Your opponent " &
+    "reads the message, but its claims are not enforced. Only the structured OFFER " &
+    "is binding and graded. Notes are private to you, returned on your next turn, " &
+    "and never shown to your opponent."
+  let briefing = case selection.selectedVariant
+    of pvPlain: identity & "\n\n" & pool & "\n\n" & turns & "\n\n" & score & "\n\n" & communication
+    of pvNumbered: """1. Play as $1. There are three seats at the table; your present one-on-one opponent is $2.
+2. Divide $3 books, $4 hats, and $5 balls. For each of you the entire pool totals exactly ten points, but individual items have different private values. You receive your own values only; neither player is given the other's.
+3. Alternate actions with your opponent. An OFFER states the number of each item you keep, with all remaining items going to the other player. ACCEPT agrees to the offer standing against you.
+4. There are at most $6 turns across both players combined. Without acceptance by that deadline, both players earn zero. Otherwise your match score is the value of your allocated items under your own values, out of ten. Delay consumes turns without any additional cost, and consumed turns cannot be restored.
+5. An action can carry a message of up to $7 characters for your opponent. Words are unenforced; only the structured OFFER binds and determines the graded allocation. Notes are visible only to you and return on your next turn."""
+    of pvQuestions: """Who is playing? You are $1, one of three table participants, and this match pits you against $2 alone.
+What is available? The pool holds $3 books plus $4 hats and $5 balls. Each player's valuation of the full pool is exactly ten points. The item values differ between players and remain private: you are told yours, never theirs, and they are not told yours.
+How can I agree? On alternating turns, either OFFER an allocation or ACCEPT the current offer against you. An offer specifies exactly how many items of each type you take; the opponent takes the remainder.
+What happens at the deadline? The two players share a limit of $6 turns. If that allowance expires without acceptance, each receives zero for the match. A completed deal instead pays you your own value for the items you receive, on a ten-point scale. Waiting spends turns but imposes no other cost; spent turns are irrecoverable.
+Can I communicate? You may include at most $7 message characters with your action for the opponent to read. Such statements carry no enforcement: the structured OFFER alone is binding and graded. Your notes are withheld from the opponent and supplied back to you at your next turn."""
+    of pvReordered: """PAYMENT AND TIME
+Your payoff for this match is your personal value of the items allocated to you, measured out of ten. Failure to agree pays zero to both sides. The match permits $6 total turns, counting both players; acceptance must occur before that supply runs out. Waiting has no penalty besides consuming turns, which cannot be recovered.
+INFORMATION
+There are $3 books, $4 hats, and $5 balls to divide. All of these items together are worth exactly ten points to each side. Per-item valuations are different and confidential: each side is given only its own, never the other's.
+ACTIONS
+Players act in alternation. Use OFFER to specify how many of each item you claim for yourself; the remainder is assigned to the opponent. Use ACCEPT to agree to the offer currently standing against you.
+CHANNELS
+A message attached to your action may contain up to $7 characters and is read by the opponent. Its promises have no enforcement. Only the structured OFFER is binding and scored. Private notes are returned on your next turn and never sent to your opponent.
+SEAT
+You are $1 at a table with three seats. The current bargaining match is one-on-one against $2."""
+    of pvHeldoutBriefing: """Take the role of $1. Although the table has three seats, you are negotiating this match with $2 one-on-one.
+
+Begin with the shared stock: $3 books, $4 hats, and $5 balls. Taken together, the stock is worth precisely ten points to either player. How that value is distributed across items differs privately between you. Only your own item values are disclosed to you; your opponent likewise receives only theirs.
+
+You and your opponent act in turn. To propose a division, issue an OFFER containing the exact counts you intend to keep. Everything left belongs to the opponent. To settle on their standing proposal, issue ACCEPT.
+
+The entire negotiation has a budget of $6 turns between both players. If that budget ends without acceptance, each of you gets zero. With an agreement, your score is the value you assign to the items you end up holding, out of ten. There is no waiting charge other than the turn spent, and time already spent cannot be regained.
+
+You can accompany an action with no more than $7 characters of text, which the other player reads. Those words cannot enforce a promise: the structured OFFER is the sole binding, graded channel. Keep personal reminders in notes; only you see them, and they come back on your next turn."""
+    of pvHeldoutReference: """Participants: your identity is $1. This is a three-seat table with a current bilateral match against $2.
+Inventory and knowledge: $3 books, $4 hats, $5 balls. The full inventory has a value of exactly ten points for each participant. Individual item values differ and are private. Neither participant is supplied with the other's valuation; each knows their own.
+Permitted choices: turns alternate between the two participants. OFFER names exact quantities retained by the proposer, allocating the remainder to the opponent. ACCEPT selects the proposal standing against the accepting participant.
+Termination and reward: at most $6 turns may be used by the two participants in total. If no acceptance occurs before turns are exhausted, the outcome is zero for both. Under an agreement, your reward is your valuation of your final allocation, out of ten. Waiting uses an unrecoverable turn and has no further cost.
+Text channels: an action may include an opponent-visible message limited to $7 characters. Message claims are not enforced. Binding and grading concern only the structured OFFER. Notes have a different audience: they are private to their author, are returned on that author's next turn, and are never disclosed to the opponent."""
+    of pvCanonical, pvMixed: raise newException(ValueError, "alternate wording must resolve")
+  (briefing & "\n\n" & """OUTPUT FORMAT: reply with ONLY one JSON object, nothing else - no analysis, no
+explanation, no markdown fences, no text before or after the object. Your reply
+must begin with the character { and end with }.""") % values
 
 proc historyText(sim: Sim, side: int): string =
   ## Every offer of THIS match, both sides, each with its worth to this seat.
@@ -471,6 +525,7 @@ proc completeText(client: LlmClient, system, user: string, slot: int): string =
 
 proc decide*(
   client: LlmClient,
+  selection: PromptSelection,
   sim: Sim,
   call: Call,
   prompt: string,
@@ -488,7 +543,7 @@ proc decide*(
     result = scriptedDecision(sim, baseline)
     result.fallback = true
     return
-  let system = systemPrompt(sim, call.seat)
+  let system = systemPrompt(selection, sim, call.seat)
   for attempt in 0 .. 1:
     try:
       var decision: Decision
@@ -514,3 +569,10 @@ proc decide*(
     " falling back to the ", baseline, " baseline"
   result = scriptedDecision(sim, baseline)
   result.fallback = true
+
+proc decisionJson*(decision: Decision): JsonNode =
+  result = %*{"action": decision.action, "message": decision.message,
+    "notes": decision.notes}
+  if decision.action == "offer":
+    result["take"] = %*{"books": decision.take[0], "hats": decision.take[1],
+      "balls": decision.take[2]}
