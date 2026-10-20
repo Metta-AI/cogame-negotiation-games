@@ -62,9 +62,10 @@ when isMainModule:
     of "reset":
       doAssert request["players"].getInt() == Seats
       selection = promptSelection(request)
-      if request.hasKey("split") and request["split"].getStr() == "train":
-        doAssert selection.selectedVariant notin {pvHeldoutBriefing, pvHeldoutReference},
-          "held-out wording is evaluation only"
+      if selection.selectedVariant in {pvHeldoutBriefing, pvHeldoutReference}:
+        doAssert request.hasKey("split") and
+          request["split"].getStr() in ["evaluation", "validation", "test"],
+          "held-out wording requires an explicit evaluation split"
       let runtime = copy(variantConfig)
       runtime["seed"] = %seedOf(request["seed"])
       runtime["tokens"] = %*["t0", "t1", "t2"]

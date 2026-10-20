@@ -47,6 +47,7 @@ def play(bridge: Path, variant: str, seed: int, wording: str, prompt_seed: int) 
             "seed": seed,
             "promptVariant": wording,
             "promptSeed": prompt_seed,
+            "split": "evaluation",
         }
     )
     selected = WORDINGS[prompt_seed % 5] if wording == "mixed" else wording
@@ -120,7 +121,11 @@ def main() -> None:
             "complete games preserve rules, private views, Unicode actions and scores",
             flush=True,
         )
-    for wording in WORDINGS[-2:]:
+    for wording, split in (
+        (wording, split)
+        for wording in WORDINGS[-2:]
+        for split in (None, "train", "typo")
+    ):
         result = subprocess.run(
             [
                 str(args.bridge),
@@ -132,7 +137,7 @@ def main() -> None:
                     "kind": "reset",
                     "players": 3,
                     "seed": 1,
-                    "split": "train",
+                    **({"split": split} if split is not None else {}),
                     "promptVariant": wording,
                 }
             )
@@ -143,7 +148,7 @@ def main() -> None:
         )
         assert (
             result.returncode != 0
-            and "held-out wording is evaluation only" in result.stderr
+            and "held-out wording requires an explicit evaluation split" in result.stderr
         )
     print(f"PASS {count} complete bargaining games", flush=True)
 

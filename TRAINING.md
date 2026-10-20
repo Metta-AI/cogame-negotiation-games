@@ -40,3 +40,6 @@ committed source so revision pins identify the exported code.
 Corpora require content review before training. Scripted parity checks do not measure
 model quality or establish resistance to training collapse. Numeric training still
 requires a separate conditional action codec for offer/accept and item quantities.
+
+Held-out bridge wordings require an explicit `evaluation`, `validation`, or `test`
+split. Omitted, training, and unrecognized splits reject them.
