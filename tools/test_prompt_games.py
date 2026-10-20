@@ -58,7 +58,7 @@ def play(bridge: Path, variant: str, seed: int, wording: str, prompt_seed: int) 
         view = obs["semantic_view"]
         metadata = view.pop("prompt_template")
         assert metadata == {
-            "bank": "negotiation-games-rules-v2",
+            "bank": "negotiation-games-rules-v3",
             "variant": selected,
             "selection": wording,
             "seed": prompt_seed,
@@ -148,7 +148,8 @@ def main() -> None:
         )
         assert (
             result.returncode != 0
-            and "held-out wording requires an explicit evaluation split" in result.stderr
+            and "held-out wording requires an explicit evaluation split"
+            in result.stderr
         )
     print(f"PASS {count} complete bargaining games", flush=True)
 

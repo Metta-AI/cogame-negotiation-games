@@ -1,6 +1,6 @@
 # Negotiation Games training
 
-The `negotiation-games-rules-v2` bank provides five training presentations and two
+The `negotiation-games-rules-v3` bank provides five training presentations and two
 evaluation-only presentations. Complete explanations of private values, offers,
 acceptance, turn limits, payoffs, cheap talk, and private notes vary in wording and
 order. Canonical messages, sampled game budgets, and action syntax stay fixed.
@@ -43,3 +43,7 @@ requires a separate conditional action codec for offer/accept and item quantitie
 
 Held-out bridge wordings require an explicit `evaluation`, `validation`, or `test`
 split. Omitted, training, and unrecognized splits reject them.
+
+Version three independently phrases the numbered, question-led, reordered, and
+held-out rules. Canonical/plain text and response syntax remain unchanged. Export
+episode IDs include selected wording and prompt seed; gameplay seed families stay fixed.
