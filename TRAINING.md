@@ -47,3 +47,33 @@ split. Omitted, training, and unrecognized splits reject them.
 Version three independently phrases the numbered, question-led, reordered, and
 held-out rules. Canonical/plain text and response syntax remain unchanged. Export
 episode IDs include requested selection, resolved wording, and prompt seed; gameplay seed families stay fixed.
+
+## Hosted private trace identity
+
+New private traces use catalog identity `negotiation-games`, matching the registered
+engine and authenticated serving receipts. Their `observation.prompt_configuration`
+uses the same complete bank/variant/selection/seed metadata as native external
+observation frames. This fixes the old incomplete configuration object without
+changing rule wording, model requests, offers, acceptance, private values, notes,
+match budgets or outcomes.
+
+The source-owned replay verifier explicitly retains the archived `negotiation`
+name and raw prompt-selection format. It checks current canonical bank metadata
+and decision identity consistently. Stored traces and old failed admissions are
+not rewritten or granted new authority by this source correction. Recollect on a
+source-pinned certified release, independently join provider receipts and review
+physical/dependency families before preparing a learner.
+
+The complete system check runs both ordinary manifest variants at two seeds through
+the actual game server and bundled reference players. It verifies typed prompt-bank
+metadata, executed actions and terminal replay scores, owner-readable private
+artifacts and legacy reader support. Its scripted fixture responses are software
+qualification, not real-model training data. Only spectator pacing is removed;
+match counts, turn limits and gameplay remain the ordinary native ones.
+
+```sh
+nim c -d:release --path:src -o:/path/negotiation src/negotiation.nim
+nim c -d:release --path:src -o:/path/player src/negotiation_player.nim
+nim c -d:release --path:src -o:/path/verifier tools/verify_native_posttrain.nim
+python3 tools/test_native_trace_identity.py /path/negotiation /path/player /path/verifier /new/private/output
+```

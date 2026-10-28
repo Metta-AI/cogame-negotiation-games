@@ -442,7 +442,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           state.trajectory.get().recordExecutedDecision($simCopy.events.len, $call.seat,
             config.players[call.seat].name, %*{"view": decisionObservation(simCopy, call.seat), "operator_prompt": seatPrompt,
               "control": (if seatExternal: "external" else: "internal"),
-              "prompt_configuration": %*{"promptVariant": $selection.variant, "promptSeed": selection.seed}},
+              "prompt_configuration": selection.selectionMetadata()},
             action, decision.nativeAttempts, origin, systemPrompt(selection, simCopy, call.seat),
             userPrompt(simCopy, call.seat, seatPrompt), state.sim.done)
         settledAfter = state.sim.matchesSettled
@@ -687,7 +687,7 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   state.sim = initSim(config)
   if getEnv("COGAME_SAVE_TRAJECTORY_URI").len > 0:
     state.trajectory = some(newDecisionTrajectory(getEnv("COWORLD_EPISODE_ID"),
-      $config.seed, "negotiation", getEnv("COWORLD_GAME_VERSION"),
+      $config.seed, "negotiation-games", getEnv("COWORLD_GAME_VERSION"),
       getEnv("COWORLD_SOURCE_REVISION")))
   state.prompts = newSeq[string](config.players.len)
   state.scripted = newSeq[string](config.players.len)

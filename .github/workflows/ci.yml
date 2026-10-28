@@ -159,6 +159,10 @@ jobs:
       # `validate_coworld_manifest_game_configs` offline, so a manifest repo
       # CI likes but phase 40 rejects fails here instead
       # (cogame-collab-cooking, 2026-08-25).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Manifest checks
         run: |
           set -euo pipefail
@@ -241,7 +245,8 @@ jobs:
   # container (Dockerfile.replay-viewer) because the runner has no emcc.
   # ---------------------------------------------------------------------
   wasm-viewer:
-    runs-on: ubuntu-latest
+    # Keep pinned Playwright1.55 on its supported dependency set.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     # The bundle is EXECUTED here, not merely built, and it is executed against
     # the replay docker-smoke just produced -- hence the dependency.
