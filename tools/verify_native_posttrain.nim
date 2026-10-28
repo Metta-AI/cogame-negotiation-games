@@ -32,8 +32,13 @@ for eventIndex, event in events:
     doAssert capture["decision_index"].getInt() == index
     doAssert capture["decision_id"].getStr() == $eventIndex
     doAssert capture["seat"].getStr() == $seat
+    # Replay stores the resulting notebook; the action stores the update.
+    # An empty update preserves the seat's previous private notebook.
+    let notesUpdate = capture["executed_action"]["notes"].getStr()
+    let resultingNotes = if notesUpdate.len > 0: notesUpdate else: frames[eventIndex].notes[seat]
+    doAssert event.notes == resultingNotes
     let action = block:
-      var action = %*{"action": (if event.kind == evOffer: "offer" else: "accept"), "message": event.text, "notes": event.notes}
+      var action = %*{"action": (if event.kind == evOffer: "offer" else: "accept"), "message": event.text, "notes": notesUpdate}
       if event.kind == evOffer:
         var take = newJObject()
         for item in 0 ..< Items: take[ItemNames[item]] = %event.take[item]
