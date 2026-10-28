@@ -8,6 +8,8 @@ let replay = parseFile(args[0])
 var captures: seq[JsonNode]
 for line in readFile(args[1]).strip().splitLines(): captures.add(parseJson(line))
 let summary = captures[^1]
+let traceGame = summary["game"].getStr()
+doAssert traceGame in ["negotiation", "negotiation-games"]
 doAssert summary["event_type"].getStr() == "episode"
 doAssert summary["episode_id"].getStr() == args[2]
 doAssert summary["outcome"] == replay["results"]
@@ -26,6 +28,7 @@ for eventIndex, event in events:
     let seat = event.seat
     let capture = captures[index]
     doAssert capture["event_type"].getStr() == "decision"
+    doAssert capture["game"].getStr() == traceGame
     doAssert capture["decision_index"].getInt() == index
     doAssert capture["decision_id"].getStr() == $eventIndex
     doAssert capture["seat"].getStr() == $seat
@@ -42,7 +45,12 @@ for eventIndex, event in events:
     let configuration = capture["observation"]["prompt_configuration"]
     if index == 0: episodeSelection = configuration
     doAssert configuration == episodeSelection
-    let system = systemPrompt(promptSelection(configuration), frames[eventIndex], seat)
+    let selection = if configuration.hasKey("bank"):
+      promptSelection(%*{"promptVariant": configuration["selection"], "promptSeed": configuration["seed"]})
+      else: promptSelection(configuration)
+    if traceGame == "negotiation-games":
+      doAssert configuration == selection.selectionMetadata()
+    let system = systemPrompt(selection, frames[eventIndex], seat)
     let user = userPrompt(frames[eventIndex], seat, operatorPrompt)
     var modelAttempt = 0
     for attempt in capture["attempts"]:
