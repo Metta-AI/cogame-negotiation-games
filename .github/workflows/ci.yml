@@ -159,6 +159,10 @@ jobs:
       # `validate_coworld_manifest_game_configs` offline, so a manifest repo
       # CI likes but phase 40 rejects fails here instead
       # (cogame-collab-cooking, 2026-08-25).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Manifest checks
         run: |
           set -euo pipefail
